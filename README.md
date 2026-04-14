@@ -35,15 +35,15 @@ Apache Kafka  ──  5 topics
 
 ## Tech stack
 
-| Layer | Technology |
-|---|---|
-| Ingestion | Python · kafka-python |
-| Message bus | Apache Kafka 7.5 · Zookeeper |
-| Batch processing | Apache Spark 3.x · MLlib · Spark NLP |
-| Stream processing | Spark Structured Streaming |
-| Storage | Cassandra · PostgreSQL · Elasticsearch |
-| Visualisation | Grafana · Metabase · React |
-| Infrastructure | Docker · Docker Compose |
+| Layer             | Technology                             |
+| ----------------- | -------------------------------------- |
+| Ingestion         | Python · kafka-python                  |
+| Message bus       | Apache Kafka 7.5 · Zookeeper           |
+| Batch processing  | Apache Spark 3.x · MLlib · Spark NLP   |
+| Stream processing | Spark Structured Streaming             |
+| Storage           | Cassandra · PostgreSQL · Elasticsearch |
+| Visualisation     | Grafana · Metabase · React             |
+| Infrastructure    | Docker · Docker Compose                |
 
 ---
 
@@ -125,3 +125,45 @@ spotify-streaming-pipeline/
 ## License
 
 MIT
+
+Layer 1:
+
+# ── 1. Installer les dépendances ────────────────────────────
+
+pip install -r requirements.txt
+
+# ── 2. Lancer Kafka + Zookeeper ─────────────────────────────
+
+cd docker
+docker compose up -d
+
+# Attendre ~30 secondes que Kafka soit prêt
+
+# Vérifier que tout tourne
+
+docker compose ps
+
+# → kafka et zookeeper doivent être "Up"
+
+# ── 3. Vérifier les topics créés ────────────────────────────
+
+docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+
+# ── 4. Lancer le simulateur d'événements (dans un terminal) ─
+
+cd ..
+python ingestion/producer_stream.py
+
+# ── 5. Dans un 2ème terminal : vérifier les messages ────────
+
+python ingestion/test_consumer.py
+
+# ── 6. (Optionnel) Kafka UI dans ton navigateur ─────────────
+
+# Ouvrir : http://localhost:8080
+
+# → Tu verras les topics et les messages en temps réel
+
+# ── 7. (Après avoir mis tracks.csv dans ./data/) ─────────────
+
+python ingestion/producer_batch_csv.py

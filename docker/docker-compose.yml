@@ -1,0 +1,77 @@
+# =============================================================
+# docker-compose.yml — Infrastructure Kafka pour Couche 1
+# used to define and manage multi-container Docker applications
+# 3 containers : zookeeper -> kafka broker -> kafka ui
+# =============================================================
+
+# Version de Docker Compose utilisée
+version: "3.8"
+
+# Defines all containers (services) that will run together
+services:
+  # -----------------------------------------------------------
+  # ZOOKEEPER — Coordinateur du cluster Kafka
+  # -----------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0 # hadhi el image elli npulliwha
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181 # This defines the port inside the Zookeeper container
+      ZOOKEEPER_TICK_TIME: 2000 # Intervalle de heartbeat (ms) : It’s the basic time unit Zookeeper uses for checking if a server is alive or not. If a server doesn’t send a heartbeat within this time, it’s considered dead.
+    ports:
+      - "2181:2181" # HOST_PORT : CONTAINER_PORT
+    healthcheck: #“How do I know if this container is healthy or not?”
+      test: ["CMD", "nc", "-z", "localhost", "2181"] # this command is executed inside the container !!! Check if port 2181 is open inside the container
+      interval: 10s #test is run every 10 seconds
+      timeout: 5s #Each test must finish within 5 seconds
+      retries: 5 #retry 5 times before marking container as unhealthy
+
+  # -----------------------------------------------------------
+  # The Kafka container = one Kafka broker
+  # -----------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1 # Unique identifier of the broker
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181 #Tells Kafka where Zookeeper is container_name:internal_port
+      # 👉 A listener = a network entry point of a broker where client can connect
+      # PLAINTEXT_HOST → accessible depuis ta machine (localhost:9092)
+      # PLAINTEXT      → accessible depuis l'intérieur du réseau Docker used by other containers like kafka ui
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT #Defines security protocol for each listener : no encryption/authentication
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT #Which network interface (listener) should brokers use to talk to each other?
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # 1 seul broker en dev ; no replication of the internal topic that Kafka uses to store consumer offsets (last processed offset for each consumer )
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # Crée les topics automatiquement
+      KAFKA_LOG_RETENTION_HOURS: 24 # Garde les messages 24h
+    healthcheck:
+      test: [
+          "CMD",
+          "kafka-topics", #kafka-topics : This is a Kafka CLI tool used to manage topics.
+          "--bootstrap-server",
+          "localhost:9092", # “Connect to the Kafka broker running inside this container”
+          "--list",
+        ] # => show all topics in the cluster. If this command succeeds, it means the broker is up and running.
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # -----------------------------------------------------------
+  # KAFKA-UI — Interface web pour visualiser les topics/messages
+  # Accessible sur http://localhost:8080
+  # -----------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-cluster #This is just a label (name) for your Kafka cluster in the UI.
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 #my brokers

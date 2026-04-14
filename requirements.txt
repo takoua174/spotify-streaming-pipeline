@@ -1,0 +1,12 @@
+# Kafka client Python
+kafka-python==2.0.2
+
+# Manipulation données
+pandas==2.1.4
+numpy==1.26.2
+
+# Chargement variables d'environnement
+python-dotenv==1.0.0
+
+# Logs colorés (optionnel maais utile)
+colorlog==6.8.0
