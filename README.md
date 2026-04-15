@@ -82,6 +82,54 @@ Kafka UI available at `http://localhost:8080` once the stack is running.
 
 ---
 
+## Layer 3a — K-Means genre clustering (implemented)
+
+This batch job reads normalized audio features from Kafka topic `genre-signals`,
+evaluates candidate K values, trains a final K-Means model, then writes
+dashboard-ready outputs to PostgreSQL.
+
+### New files
+
+```text
+processing/batch/kmeans_genre_clustering.py
+storage/postgres/init/001_kmeans_schema.sql
+```
+
+### Run order
+
+```bash
+# 1) Start infrastructure (Kafka + Spark + PostgreSQL)
+cd docker
+docker compose up -d --build
+
+# 2) Feed Kafka topic genre-signals with batch producer
+cd ..
+python ingestion/producer_batch_csv.py
+
+# 3) Submit Spark batch job from Spark master container
+cd docker
+docker compose exec spark-master /bin/bash -lc "mkdir -p /tmp/.ivy2/cache /tmp/.ivy2/jars ; /opt/spark/bin/spark-submit --master spark://spark-master:7077 --conf spark.jars.ivy=/tmp/.ivy2 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.4 /opt/pipeline/processing/batch/kmeans_genre_clustering.py"
+```
+
+### Output tables (PostgreSQL)
+
+- `analytics.batch_runs`
+- `analytics.cluster_metrics`
+- `analytics.song_clusters`
+- `analytics.cluster_centroids`
+- `analytics.cluster_profiles`
+- `analytics.v_cluster_overview`
+
+### Quick verification
+
+```bash
+cd docker
+docker compose exec postgres psql -U spotify_user -d spotify_analytics -c "SELECT run_id, final_k, final_silhouette FROM analytics.batch_runs ORDER BY created_at DESC LIMIT 5;"
+docker compose exec postgres psql -U spotify_user -d spotify_analytics -c "SELECT run_id, cluster_id, cluster_size FROM analytics.cluster_profiles ORDER BY run_id DESC, cluster_id;"
+```
+
+---
+
 ## Project structure
 
 ```
@@ -125,45 +173,3 @@ spotify-streaming-pipeline/
 ## License
 
 MIT
-
-Layer 1:
-
-# ── 1. Installer les dépendances ────────────────────────────
-
-pip install -r requirements.txt
-
-# ── 2. Lancer Kafka + Zookeeper ─────────────────────────────
-
-cd docker
-docker compose up -d
-
-# Attendre ~30 secondes que Kafka soit prêt
-
-# Vérifier que tout tourne
-
-docker compose ps
-
-# → kafka et zookeeper doivent être "Up"
-
-# ── 3. Vérifier les topics créés ────────────────────────────
-
-docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list
-
-# ── 4. Lancer le simulateur d'événements (dans un terminal) ─
-
-cd ..
-python ingestion/producer_stream.py
-
-# ── 5. Dans un 2ème terminal : vérifier les messages ────────
-
-python ingestion/test_consumer.py
-
-# ── 6. (Optionnel) Kafka UI dans ton navigateur ─────────────
-
-# Ouvrir : http://localhost:8080
-
-# → Tu verras les topics et les messages en temps réel
-
-# ── 7. (Après avoir mis tracks.csv dans ./data/) ─────────────
-
-python ingestion/producer_batch_csv.py
