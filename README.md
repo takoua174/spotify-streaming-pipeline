@@ -84,9 +84,10 @@ Kafka UI available at `http://localhost:8080` once the stack is running.
 
 ## Layer 3a — K-Means genre clustering (implemented)
 
-This batch job reads normalized audio features from Kafka topic `genre-signals`,
+This batch job reads song audio metadata from Kafka topic `song-metadata`,
 evaluates candidate K values, trains a final K-Means model, then writes
-dashboard-ready outputs to PostgreSQL.
+dashboard-ready outputs to PostgreSQL and publishes clustering signals to
+Kafka topic `genre-signals`.
 
 ### New files
 
@@ -102,7 +103,7 @@ storage/postgres/init/001_kmeans_schema.sql
 cd docker
 docker compose up -d --build
 
-# 2) Feed Kafka topic genre-signals with batch producer
+# 2) Feed Kafka topic song-metadata with batch producer
 cd ..
 python ingestion/producer_batch_csv.py
 
@@ -119,6 +120,11 @@ docker compose exec spark-master /bin/bash -lc "mkdir -p /tmp/.ivy2/cache /tmp/.
 - `analytics.cluster_centroids`
 - `analytics.cluster_profiles`
 - `analytics.v_cluster_overview`
+
+### Kafka output (from Spark batch)
+
+- Topic: `genre-signals`
+- Message types: `song_cluster_assignment`, `cluster_profile`
 
 ### Quick verification
 

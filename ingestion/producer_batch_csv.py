@@ -12,8 +12,10 @@ Colonnes confirmées artists.csv (71K lignes) :
   id, name, followers, popularity, genres, main_genre
 
 Envoie vers :
-  → song-metadata   (features audio complètes + album + artiste)
-  → genre-signals   (main_genre + genres tags depuis artists.csv)
+    → song-metadata   (features audio complètes + album + artiste + infos genre)
+
+Le topic genre-signals est maintenant produit par le job Spark batch
+de clustering, pas directement par ce producer CSV.
 """
 
 import json
@@ -35,7 +37,6 @@ log = logging.getLogger("producer_batch_csv")
 
 BOOTSTRAP_SERVERS   = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TOPIC_SONG_METADATA = os.getenv("TOPIC_SONG_METADATA",  "song-metadata")
-TOPIC_GENRE_SIGNALS = os.getenv("TOPIC_GENRE_SIGNALS",  "genre-signals")
 DATA_DIR            = os.getenv("DATA_DIR",    "./data")
 TRACKS_CSV          = os.getenv("TRACKS_CSV",  "songs.csv")
 ARTISTS_CSV         = os.getenv("ARTISTS_CSV", "artists.csv")
@@ -135,6 +136,13 @@ def row_to_metadata_event(row: dict, artist_info: dict) -> dict:
     # Cherche l'artiste principal dans le dict artists
     artist_data = artist_info.get(primary_artist.lower(), {})
 
+    # Genres depuis artists.csv (optionnel si non dispo)
+    raw_genres = artist_data.get("genres", "[]")
+    try:
+        genres_list = ast.literal_eval(raw_genres) if isinstance(raw_genres, str) else []
+    except Exception:
+        genres_list = []
+
     return {
         "song_id":           str(row.get("id", "")),
         "title":             str(row.get("name", "Unknown")),
@@ -158,45 +166,9 @@ def row_to_metadata_event(row: dict, artist_info: dict) -> dict:
         # Infos artiste enrichies depuis artists.csv
         "artist_followers":  int(artist_data.get("followers", 0)),
         "artist_popularity": int(artist_data.get("popularity", 0)),
+        "main_genre":        str(artist_data.get("main_genre", "Unknown")),
+        "genres":            genres_list,
         "source":            "kaggle_songs_csv"
-    }
-
-
-def row_to_genre_signal(row: dict, artist_info: dict) -> dict:
-    """
-    Construit le message genre-signals.
-    Utilise main_genre et genres depuis artists.csv.
-    Le vecteur features servira au K-Means en Couche 3a.
-    """
-    artists_list   = parse_artists_field(row.get("artists", "[]"))
-    primary_artist = artists_list[0] if artists_list else "Unknown"
-    artist_data    = artist_info.get(primary_artist.lower(), {})
-
-    # Genres depuis artists.csv
-    raw_genres = artist_data.get("genres", "[]")
-    try:
-        genres_list = ast.literal_eval(raw_genres) if isinstance(raw_genres, str) else []
-    except Exception:
-        genres_list = []
-
-    return {
-        "song_id":    str(row.get("id", "")),
-        "main_genre": str(artist_data.get("main_genre", "Unknown")),
-        "genres":     genres_list,
-        # Vecteur audio pour K-Means clustering (Couche 3a)
-        "features": {
-            "danceability":     float(row.get("danceability", 0)),
-            "energy":           float(row.get("energy", 0)),
-            "acousticness":     float(row.get("acousticness", 0)),
-            "instrumentalness": float(row.get("instrumentalness", 0)),
-            "valence":          float(row.get("valence", 0)),
-            "speechiness":      float(row.get("speechiness", 0)),
-            "liveness":         float(row.get("liveness", 0)),
-            "loudness_norm":    max(0.0, (float(row.get("loudness", -60)) + 60) / 60),
-            # tempo normalisé entre 0 et 1 (max 250 BPM)
-            "tempo_norm":       min(float(row.get("tempo", 0)) / 250.0, 1.0),
-        },
-        "source": "kaggle_batch"
     }
 
 # ─────────────────────────────────────────────────────────────
@@ -236,6 +208,7 @@ def run():
         return
 
     log.info(f"Démarrage producer batch CSV → broker={BOOTSTRAP_SERVERS}")
+    log.info(f"Topic sortie: {TOPIC_SONG_METADATA}")
 
     producer     = create_producer()
     artist_index = load_artists(artists_path)   # dict name → row
@@ -255,14 +228,6 @@ def run():
                 key=meta["song_id"].encode("utf-8")
             )
 
-            # ── Topic 2 : genre-signals ──────────────────────────
-            genre = row_to_genre_signal(row_dict, artist_index)
-            producer.send(
-                TOPIC_GENRE_SIGNALS,
-                value=genre,
-                key=genre["song_id"].encode("utf-8")
-            )
-
             sent += 1
             if sent % BATCH_SIZE == 0:
                 producer.flush()
@@ -271,7 +236,7 @@ def run():
                 time.sleep(BATCH_PAUSE_SEC) # time to wait for the sending to complete and not have an overload
 
         producer.flush()
-        log.info(f"✓ Batch terminé : {sent} chansons envoyées dans Kafka")
+        log.info(f"✓ Batch terminé : {sent} chansons envoyées dans {TOPIC_SONG_METADATA}")
 
     except KeyboardInterrupt:
         log.info("Batch interrompu par l'utilisateur.")

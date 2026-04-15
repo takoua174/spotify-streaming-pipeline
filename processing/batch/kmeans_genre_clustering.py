@@ -4,10 +4,10 @@ kmeans_genre_clustering.py
 Batch Spark job for musical similarity clustering.
 
 Flow:
-1. Read normalized audio features from Kafka topic genre-signals.
+1. Read song metadata from Kafka topic song-metadata.
 2. Evaluate candidate K values with silhouette and training cost.
 3. Train final KMeans model.
-4. Persist outputs to PostgreSQL for dashboards.
+4. Persist outputs to PostgreSQL and publish cluster signals to Kafka topic genre-signals.
 """
 
 from __future__ import annotations
@@ -62,9 +62,11 @@ class AppConfig:
     spark_jars_ivy: str
     spark_sql_shuffle_partitions: int
     kafka_bootstrap_servers: str
-    kafka_topic: str
+    kafka_input_topic: str
+    kafka_output_topic: str
     kafka_starting_offsets: str
     kafka_ending_offsets: str
+    input_max_rows: int | None
     candidate_ks: list[int]
     final_k: int | None
     kmeans_max_iter: int
@@ -127,9 +129,11 @@ def load_config() -> AppConfig:
         spark_jars_ivy=os.getenv("SPARK_JARS_IVY", "/tmp/.ivy2"),
         spark_sql_shuffle_partitions=int(os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")),
         kafka_bootstrap_servers=os.getenv("SPARK_KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"),
-        kafka_topic=os.getenv("SPARK_KAFKA_TOPIC", os.getenv("TOPIC_GENRE_SIGNALS", "genre-signals")),
+        kafka_input_topic=os.getenv("SPARK_KAFKA_INPUT_TOPIC", os.getenv("TOPIC_SONG_METADATA", "song-metadata")),
+        kafka_output_topic=os.getenv("SPARK_KAFKA_OUTPUT_TOPIC", os.getenv("TOPIC_GENRE_SIGNALS", "genre-signals")),
         kafka_starting_offsets=os.getenv("SPARK_KAFKA_STARTING_OFFSETS", "earliest"),
         kafka_ending_offsets=os.getenv("SPARK_KAFKA_ENDING_OFFSETS", "latest"),
+        input_max_rows=parse_optional_int(os.getenv("KMEANS_INPUT_MAX_ROWS", "")),
         candidate_ks=parse_int_list(os.getenv("KMEANS_CANDIDATE_KS", "6,8,10,12"), [6, 8, 10, 12]),
         final_k=parse_optional_int(os.getenv("KMEANS_FINAL_K", "")),
         kmeans_max_iter=int(os.getenv("KMEANS_MAX_ITER", "30")),
@@ -161,39 +165,41 @@ def build_spark_session(cfg: AppConfig) -> SparkSession:
     )
 
 
-def kafka_message_schema() -> T.StructType:
+def song_metadata_schema() -> T.StructType:
     return T.StructType(
         [
             T.StructField("song_id", T.StringType(), True),
+            T.StructField("title", T.StringType(), True),
+            T.StructField("album_name", T.StringType(), True),
+            T.StructField("artists", T.ArrayType(T.StringType()), True),
+            T.StructField("primary_artist", T.StringType(), True),
+            T.StructField("danceability", T.DoubleType(), True),
+            T.StructField("energy", T.DoubleType(), True),
+            T.StructField("key", T.IntegerType(), True),
+            T.StructField("loudness", T.DoubleType(), True),
+            T.StructField("mode", T.IntegerType(), True),
+            T.StructField("speechiness", T.DoubleType(), True),
+            T.StructField("acousticness", T.DoubleType(), True),
+            T.StructField("instrumentalness", T.DoubleType(), True),
+            T.StructField("liveness", T.DoubleType(), True),
+            T.StructField("valence", T.DoubleType(), True),
+            T.StructField("tempo", T.DoubleType(), True),
+            T.StructField("duration_ms", T.LongType(), True),
+            T.StructField("explicit", T.BooleanType(), True),
+            T.StructField("artist_followers", T.LongType(), True),
+            T.StructField("artist_popularity", T.LongType(), True),
             T.StructField("main_genre", T.StringType(), True),
             T.StructField("genres", T.ArrayType(T.StringType()), True),
-            T.StructField(
-                "features",
-                T.StructType(
-                    [
-                        T.StructField("danceability", T.DoubleType(), True),
-                        T.StructField("energy", T.DoubleType(), True),
-                        T.StructField("acousticness", T.DoubleType(), True),
-                        T.StructField("instrumentalness", T.DoubleType(), True),
-                        T.StructField("valence", T.DoubleType(), True),
-                        T.StructField("speechiness", T.DoubleType(), True),
-                        T.StructField("liveness", T.DoubleType(), True),
-                        T.StructField("loudness_norm", T.DoubleType(), True),
-                        T.StructField("tempo_norm", T.DoubleType(), True),
-                    ]
-                ),
-                True,
-            ),
             T.StructField("source", T.StringType(), True),
         ]
     )
 
 
-def read_genre_signals(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFrame]:
+def read_song_metadata(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFrame]:
     kafka_df = (
         spark.read.format("kafka")
         .option("kafka.bootstrap.servers", cfg.kafka_bootstrap_servers)
-        .option("subscribe", cfg.kafka_topic)
+        .option("subscribe", cfg.kafka_input_topic)
         .option("startingOffsets", cfg.kafka_starting_offsets)
         .option("endingOffsets", cfg.kafka_ending_offsets)
         .option("failOnDataLoss", "false")
@@ -202,7 +208,7 @@ def read_genre_signals(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFr
 
     parsed = (
         kafka_df.select(F.col("value").cast("string").alias("payload_json"))
-        .select(F.from_json(F.col("payload_json"), kafka_message_schema()).alias("payload"))
+        .select(F.from_json(F.col("payload_json"), song_metadata_schema()).alias("payload"))
         .select("payload.*")
     )
 
@@ -212,25 +218,49 @@ def read_genre_signals(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFr
         F.col("song_id"),
         F.coalesce(F.col("main_genre"), F.lit("unknown")).alias("main_genre"),
         F.col("genres"),
-        F.col("features.danceability").alias("danceability"),
-        F.col("features.energy").alias("energy"),
-        F.col("features.acousticness").alias("acousticness"),
-        F.col("features.instrumentalness").alias("instrumentalness"),
-        F.col("features.valence").alias("valence"),
-        F.col("features.speechiness").alias("speechiness"),
-        F.col("features.liveness").alias("liveness"),
-        F.col("features.loudness_norm").alias("loudness_norm"),
-        F.col("features.tempo_norm").alias("tempo_norm"),
+        F.col("danceability").alias("danceability"),
+        F.col("energy").alias("energy"),
+        F.col("acousticness").alias("acousticness"),
+        F.col("instrumentalness").alias("instrumentalness"),
+        F.col("valence").alias("valence"),
+        F.col("speechiness").alias("speechiness"),
+        F.col("liveness").alias("liveness"),
+        F.col("loudness").alias("loudness"),
+        F.col("tempo").alias("tempo"),
     )
 
     cleaned = flattened.filter(F.col("song_id").isNotNull())
 
-    for column in FEATURE_COLUMNS:
+    for column in [
+        "danceability",
+        "energy",
+        "acousticness",
+        "instrumentalness",
+        "valence",
+        "speechiness",
+        "liveness",
+        "loudness",
+        "tempo",
+    ]:
         cleaned = cleaned.withColumn(column, F.col(column).cast("double"))
+
+    cleaned = cleaned.withColumn(
+        "loudness_norm",
+        F.greatest(F.lit(0.0), F.least((F.col("loudness") + F.lit(60.0)) / F.lit(60.0), F.lit(1.0))),
+    )
+    cleaned = cleaned.withColumn(
+        "tempo_norm",
+        F.greatest(F.lit(0.0), F.least(F.col("tempo") / F.lit(250.0), F.lit(1.0))),
+    )
+
+    for column in FEATURE_COLUMNS:
         cleaned = cleaned.withColumn(column, F.greatest(F.lit(0.0), F.least(F.col(column), F.lit(1.0))))
 
     cleaned = cleaned.dropna(subset=FEATURE_COLUMNS)
-    deduped = cleaned.dropDuplicates(["song_id"]).cache()
+    deduped = cleaned.dropDuplicates(["song_id"])
+    if cfg.input_max_rows is not None and cfg.input_max_rows > 0:
+        deduped = deduped.limit(cfg.input_max_rows)
+    deduped = deduped.cache()
     return raw_count, deduped
 
 
@@ -243,6 +273,16 @@ def write_to_postgres(df: DataFrame, cfg: AppConfig, table_name: str) -> None:
         .option("password", cfg.postgres_password)
         .option("driver", "org.postgresql.Driver")
         .mode("append")
+        .save()
+    )
+
+
+def write_to_kafka_messages(df: DataFrame, cfg: AppConfig) -> None:
+    (
+        df.select(F.col("key").cast("string"), F.col("value").cast("string"))
+        .write.format("kafka")
+        .option("kafka.bootstrap.servers", cfg.kafka_bootstrap_servers)
+        .option("topic", cfg.kafka_output_topic)
         .save()
     )
 
@@ -358,19 +398,77 @@ def build_assignments_df(cfg: AppConfig, predictions: DataFrame) -> DataFrame:
     )
 
 
+def build_genre_signal_assignments_for_kafka(cfg: AppConfig, predictions: DataFrame) -> DataFrame:
+    base = predictions.withColumn("cluster_id", F.col("prediction").cast("int"))
+    empty_genres = F.from_json(F.lit("[]"), T.ArrayType(T.StringType()))
+
+    payload = F.struct(
+        F.lit("song_cluster_assignment").alias("signal_type"),
+        F.lit(1).alias("schema_version"),
+        F.lit(cfg.run_id).alias("run_id"),
+        F.current_timestamp().cast("string").alias("produced_at_utc"),
+        F.lit(cfg.kafka_input_topic).alias("source_topic"),
+        F.col("song_id"),
+        F.coalesce(F.col("main_genre"), F.lit("unknown")).alias("main_genre"),
+        F.coalesce(F.col("genres"), empty_genres).alias("genres"),
+        F.col("cluster_id"),
+        F.struct(*[F.col(name).alias(name) for name in FEATURE_COLUMNS]).alias("features"),
+        F.lit("spark_kmeans").alias("model_name"),
+        F.lit("v1").alias("model_version"),
+    )
+
+    return base.select(
+        F.col("song_id").alias("key"),
+        F.to_json(payload).alias("value"),
+    )
+
+
+def build_genre_signal_profiles_for_kafka(
+    cfg: AppConfig,
+    profiles_df: DataFrame,
+    centroids_df: DataFrame,
+) -> DataFrame:
+    joined = profiles_df.join(
+        centroids_df.drop("created_at"),
+        on=["run_id", "cluster_id"],
+        how="left",
+    )
+
+    payload = F.struct(
+        F.lit("cluster_profile").alias("signal_type"),
+        F.lit(1).alias("schema_version"),
+        F.col("run_id"),
+        F.current_timestamp().cast("string").alias("produced_at_utc"),
+        F.lit(cfg.kafka_input_topic).alias("source_topic"),
+        F.col("cluster_id"),
+        F.col("cluster_size"),
+        F.col("top_genres_json"),
+        F.struct(*[F.col(f"centroid_{name}").alias(name) for name in FEATURE_COLUMNS]).alias("centroid_features"),
+        F.lit("spark_kmeans").alias("model_name"),
+        F.lit("v1").alias("model_version"),
+    )
+
+    key_col = F.concat(F.col("run_id"), F.lit(":"), F.col("cluster_id").cast("string"))
+    return joined.select(
+        key_col.alias("key"),
+        F.to_json(payload).alias("value"),
+    )
+
+
 def main() -> None:
     cfg = load_config()
     spark = build_spark_session(cfg)
     started_at = datetime.now(timezone.utc)
 
     print(f"[INFO] Run ID: {cfg.run_id}")
-    print(f"[INFO] Kafka source: {cfg.kafka_bootstrap_servers} / topic={cfg.kafka_topic}")
+    print(f"[INFO] Kafka source: {cfg.kafka_bootstrap_servers} / topic={cfg.kafka_input_topic}")
+    print(f"[INFO] Kafka output topic: {cfg.kafka_output_topic}")
 
-    raw_count, deduped_df = read_genre_signals(spark, cfg)
+    raw_count, deduped_df = read_song_metadata(spark, cfg)
     dedup_count = deduped_df.count()
 
     if dedup_count == 0:
-        raise RuntimeError("No valid records were read from Kafka topic genre-signals.")
+        raise RuntimeError("No valid records were read from Kafka topic song-metadata.")
 
     assembled_full = ensure_features_vector(deduped_df).cache()
     full_training_rows = assembled_full.count()
@@ -388,6 +486,8 @@ def main() -> None:
     print(f"[INFO] Records parsed from Kafka: {raw_count}")
     print(f"[INFO] Unique songs for clustering: {dedup_count}")
     print(f"[INFO] Rows used for K selection: {selection_rows}")
+    if cfg.input_max_rows is not None and cfg.input_max_rows > 0:
+        print(f"[INFO] Input max rows applied: {cfg.input_max_rows}")
 
     metrics_rows: list[dict[str, Any]] = []
     candidate_results: dict[int, dict[str, Any]] = {}
@@ -463,7 +563,7 @@ def main() -> None:
             "run_id": cfg.run_id,
             "started_at": started_at,
             "finished_at": finished_at,
-            "kafka_topic": cfg.kafka_topic,
+            "kafka_topic": cfg.kafka_input_topic,
             "input_rows_raw": int(raw_count),
             "input_rows_dedup": int(dedup_count),
             "candidate_ks": ",".join(str(k) for k in cfg.candidate_ks),
@@ -485,8 +585,14 @@ def main() -> None:
     write_to_postgres(centroids_df, cfg, cfg.table_cluster_centroids)
     write_to_postgres(profiles_df, cfg, cfg.table_cluster_profiles)
 
+    assignment_signals_df = build_genre_signal_assignments_for_kafka(cfg, final_predictions)
+    profile_signals_df = build_genre_signal_profiles_for_kafka(cfg, profiles_df, centroids_df)
+    write_to_kafka_messages(assignment_signals_df, cfg)
+    write_to_kafka_messages(profile_signals_df, cfg)
+
     print("[INFO] Batch KMeans job completed successfully.")
     print(f"[INFO] PostgreSQL target schema: {cfg.postgres_schema}")
+    print(f"[INFO] Kafka output topic published: {cfg.kafka_output_topic}")
     print(f"[INFO] run_id={cfg.run_id}")
 
     spark.stop()
