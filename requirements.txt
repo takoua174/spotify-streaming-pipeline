@@ -5,6 +5,9 @@ kafka-python==2.0.2
 pandas==2.1.4
 numpy==1.26.2
 
+# HTTP requests
+requests==2.31.0
+
 # Chargement variables d'environnement
 python-dotenv==1.0.0
 
