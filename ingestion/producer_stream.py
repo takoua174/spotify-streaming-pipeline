@@ -44,7 +44,7 @@ TOPIC_USER_EVENTS = os.getenv("TOPIC_USER_EVENTS",  "user-events")
 TOPIC_MOOD_INDEX  = os.getenv("TOPIC_MOOD_INDEX",   "mood-index")
 DATA_DIR          = os.getenv("DATA_DIR",    "./data")
 TRACKS_CSV        = os.getenv("TRACKS_CSV",  "songs.csv")
-MXM_TRAIN         = os.getenv("MXM_TRAIN",   "mxm_dataset_train.txt")
+# MXM_TRAIN         = os.getenv("MXM_TRAIN",   "mxm_dataset_train.txt")
 NUM_USERS         = int(os.getenv("NUM_SIMULATED_USERS", 1000))
 INTERVAL_MS       = int(os.getenv("SIMULATION_INTERVAL_MS", 500))
 
@@ -60,7 +60,7 @@ EVENT_WEIGHTS = [0.70, 0.20, 0.10]
 # CHARGEMENT DU CATALOGUE RÉEL
 # ══════════════════════════════════════════════════════════════
 
-def load_song_catalog(csv_path: str, mxm_path: str, n: int = CATALOG_SIZE) -> list[dict]:
+def load_song_catalog(csv_path: str, n: int = CATALOG_SIZE) -> list[dict]:
     """
     Charge N chansons réelles depuis songs.csv et enrichit avec
     les données Musixmatch (top mots des paroles).
@@ -92,8 +92,8 @@ def load_song_catalog(csv_path: str, mxm_path: str, n: int = CATALOG_SIZE) -> li
     log.info(f"→ {len(df)} chansons sélectionnées dans le catalogue")
 
     # ── 2. Charge Musixmatch (bag-of-words) ──────────────────
-    mxm_index = load_mxm_top_words(mxm_path)
-    log.info(f"→ {len(mxm_index)} chansons avec données Musixmatch")
+    #mxm_index = load_mxm_top_words(mxm_path)
+    #log.info(f"→ {len(mxm_index)} chansons avec données Musixmatch")
 
     # ── 3. Construit le catalogue final ──────────────────────
     catalog = []
@@ -117,7 +117,7 @@ def load_song_catalog(csv_path: str, mxm_path: str, n: int = CATALOG_SIZE) -> li
             "danceability": float(row.get("danceability", 0.5)),
             "acousticness": float(row.get("acousticness", 0.5)),
             # Top 5 mots des paroles si disponible dans Musixmatch
-            "top_words":    mxm_index.get(song_id, [])
+            #"top_words":    mxm_index.get(song_id, [])
         }
         catalog.append(entry)
 
@@ -217,7 +217,7 @@ def generate_play_event(user_id: str, song: dict) -> dict:
         "tempo":                 song["tempo"],
         "danceability":          song["danceability"],
         # Top mots depuis Musixmatch (vide si chanson non couverte)
-        "top_words":             song["top_words"],
+        #"top_words":             song["top_words"],
         # Événement simulé
         "duration_listened_sec": random.randint(10, 240),
         "timestamp":             datetime.utcnow().isoformat()
@@ -270,7 +270,7 @@ def compute_mood_score(song: dict) -> dict:
         "energy":     e,
         "mood_score": mood_score,
         "mood_label": label,
-        "top_words":  song["top_words"],   # paroles réelles → utile pour NLP Couche 3a
+        #"top_words":  song["top_words"],   # paroles réelles → utile pour NLP Couche 3a
         "timestamp":  datetime.utcnow().isoformat()
     }
 
@@ -302,7 +302,7 @@ def run_simulation(max_events: int = None):
     # Charge le catalogue réel au démarrage
     catalog = load_song_catalog(
         csv_path=os.path.join(DATA_DIR, TRACKS_CSV),
-        mxm_path=os.path.join(DATA_DIR, MXM_TRAIN)
+        #mxm_path=os.path.join(DATA_DIR, MXM_TRAIN)
     )
 
     log.info(f"Démarrage simulation → {len(catalog)} chansons, {NUM_USERS} utilisateurs fictifs")

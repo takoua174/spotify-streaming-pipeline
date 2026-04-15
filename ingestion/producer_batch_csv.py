@@ -41,7 +41,7 @@ TRACKS_CSV          = os.getenv("TRACKS_CSV",  "songs.csv")
 ARTISTS_CSV         = os.getenv("ARTISTS_CSV", "artists.csv")
 
 BATCH_SIZE      = 500
-BATCH_PAUSE_SEC = 0.1
+BATCH_PAUSE_SEC = 0.1 #Pause the producer for 0.1 seconds (100 ms) after each batch
 
 
 def create_producer() -> KafkaProducer:
@@ -50,8 +50,8 @@ def create_producer() -> KafkaProducer:
         value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
         acks="all",
         retries=3,
-        batch_size=16384,
-        linger_ms=10
+        batch_size=16384, #(500 messages is split into batches of 16KB) : condition 1 of sending a batch
+        linger_ms=10 #Kafka waits up to 10 milliseconds to accumulate more messages before sending : condition 2 of sending a batch
     )
 
 
@@ -199,7 +199,33 @@ def row_to_genre_signal(row: dict, artist_info: dict) -> dict:
         "source": "kaggle_batch"
     }
 
-
+# ─────────────────────────────────────────────────────────────
+# Kafka batching behavior explanation:
+#
+# The Kafka producer groups messages into batches before sending them
+# to improve throughput.
+#
+# A batch is sent when ONE of the following conditions is met:
+#
+# 1) Size condition:
+#    - The batch reaches 'batch_size' (16 KB here)
+#    → Kafka sends it immediately
+#
+# 2) Time condition:
+#    - 'linger_ms' (10 ms) has passed since the first message was added
+#    → Kafka sends the current batch even if it is not full
+#
+# This means:
+# - Messages are NOT waiting indefinitely
+# - Even small batches are sent after a short delay (10 ms)
+#
+# In addition, calling 'producer.flush()' forces Kafka to send all
+# buffered messages immediately, regardless of batch size or time.
+#
+# In this loop:
+# - Every 500 messages, we manually flush to ensure delivery
+# - Then we pause briefly (0.1s) to avoid overload
+# ─────────────────────────────────────────────────────────────
 def run():
     songs_path   = os.path.join(DATA_DIR, TRACKS_CSV)
     artists_path = os.path.join(DATA_DIR, ARTISTS_CSV)
@@ -242,7 +268,7 @@ def run():
                 producer.flush()
                 pct = sent * 100 // total
                 log.info(f"→ {sent}/{total} chansons envoyées ({pct}%)")
-                time.sleep(BATCH_PAUSE_SEC)
+                time.sleep(BATCH_PAUSE_SEC) # time to wait for the sending to complete and not have an overload
 
         producer.flush()
         log.info(f"✓ Batch terminé : {sent} chansons envoyées dans Kafka")
