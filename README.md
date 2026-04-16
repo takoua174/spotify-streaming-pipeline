@@ -168,7 +168,7 @@ spotify-streaming-pipeline/
 ## Development roadmap
 
 - [x] Layer 1 — Kafka ingestion (producers + topics)
-- [ ] Layer 2 — Topic validation & consumer tests
+- [ ] Layer 2 — Topic validation & consumer tests (leave it later)
 - [ ] Layer 3a — Spark batch (ALS · NLP · K-Means)
 - [ ] Layer 3b — Spark streaming (mood tracker · anomaly detection)
 - [ ] Layer 4 — Polyglot storage (Cassandra · PostgreSQL · Elasticsearch)

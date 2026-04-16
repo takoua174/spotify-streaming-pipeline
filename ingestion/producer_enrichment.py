@@ -14,8 +14,7 @@ Prérequis :
   2. Copier la clé API dans .env → LASTFM_API_KEY=xxxxxxxxxxxxxxxx
 
 Envoie vers :
-  → song-metadata   (playcount, listeners, tags Last.fm)
-  → genre-signals   (tags de genre enrichis depuis Last.fm)
+  → song-metadata   
 
 Stratégie de jointure :
   songs.csv  →  nom + artiste  →  Last.fm API  →  tags enrichis
@@ -42,7 +41,6 @@ log = logging.getLogger("producer_enrichment")
 # ── Config ────────────────────────────────────────────────────
 BOOTSTRAP_SERVERS   = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TOPIC_SONG_METADATA = os.getenv("TOPIC_SONG_METADATA",  "song-metadata")
-TOPIC_GENRE_SIGNALS = os.getenv("TOPIC_GENRE_SIGNALS",  "genre-signals")
 DATA_DIR            = os.getenv("DATA_DIR",   "./data")
 TRACKS_CSV          = os.getenv("TRACKS_CSV", "songs.csv")
 
@@ -78,7 +76,7 @@ class LastFmClient:
                 "→ Crée une clé gratuite sur https://www.last.fm/api/account/create"
             )
         self.api_key = api_key
-        self.session = requests.Session()
+        self.session = requests.Session() # create a persistent session object : initialisation of the session 
         self.session.headers.update({"User-Agent": "spotify-bigdata-pipeline/1.0"})
 
     def _get(self, method: str, params: dict, retries: int = 3) -> dict | None:
@@ -94,20 +92,22 @@ class LastFmClient:
 
         for attempt in range(retries):
             try:
-                resp = self.session.get(LASTFM_BASE_URL, params=params, timeout=10)
+                #Sending the HTTP request
+                response = self.session.get(LASTFM_BASE_URL, params=params, timeout=10)
 
                 # Rate limit dépassé → attendre et réessayer
-                if resp.status_code == 429:
+                if response.status_code == 429: # 429 -> too many requests
+                    # number of wait depends on the number of attempt
                     wait = 2 ** attempt
                     log.warning(f"Rate limit Last.fm → attente {wait}s")
                     time.sleep(wait)
                     continue
 
-                if resp.status_code != 200:
-                    log.debug(f"Last.fm HTTP {resp.status_code} pour {params}")
+                if response.status_code != 200:
+                    log.debug(f"Last.fm HTTP {response.status_code} pour {params}")
                     return None
 
-                data = resp.json()
+                data = response.json()
 
                 # Last.fm retourne un champ "error" même en HTTP 200
                 if "error" in data:
@@ -127,7 +127,7 @@ class LastFmClient:
         Récupère les infos d'une chanson : tags, playcount, listeners.
         Doc : https://www.last.fm/api/show/track.getInfo
         """
-        data = self._get("track.getInfo", {
+        data = self._get("track.getInfo", { # adhoma el params
             "artist":      artist,
             "track":       title,
             "autocorrect": 1    # Last.fm corrige les petites fautes de frappe
@@ -184,7 +184,7 @@ def parse_track_info(track_data: dict) -> dict:
     return {
         "lastfm_playcount":  int(track_data.get("playcount", 0) or 0),
         "lastfm_listeners":  int(track_data.get("listeners", 0) or 0),
-        "lastfm_tags":       tags,
+        "lastfm_tags":       tags, #here are teh tags in track_info
         "lastfm_url":        track_data.get("url", ""),
         # Durée depuis Last.fm (en ms, pour croiser avec songs.csv)
         "lastfm_duration_ms": int(track_data.get("duration", 0) or 0),
@@ -211,33 +211,6 @@ def build_metadata_message(song_id: str, artist: str, title: str,
     }
 
 
-def build_genre_signal(song_id: str, artist: str,
-                       tags: list, fallback_tags: list) -> dict:
-    """
-    Message pour le topic genre-signals.
-    Combine les tags du track + les tags de l'artiste en fallback.
-    """
-    # Si la chanson a des tags propres → on les utilise
-    # Sinon → on utilise les tags de l'artiste
-    final_tags = tags if tags else fallback_tags
-
-    # Détermine le genre principal (premier tag non-générique)
-    generic = {"music", "seen live", "favourite", "love", "amazing", "good"}
-    main_genre = next(
-        (t for t in final_tags if t not in generic),
-        final_tags[0] if final_tags else "unknown"
-    )
-
-    return {
-        "song_id":    song_id,
-        "artist":     artist,
-        "main_genre": main_genre,
-        "tags":       final_tags,
-        "source":     "lastfm_api",
-        "enriched_at": pd.Timestamp.utcnow().isoformat()
-    }
-
-
 # ══════════════════════════════════════════════════════════════
 # PRODUCER
 # ══════════════════════════════════════════════════════════════
@@ -250,7 +223,7 @@ def create_producer() -> KafkaProducer:
         retries=3
     )
 
-
+# Its job is to take a raw CSV file and turn it into a clean list of songs ready for API enrichment.
 def load_songs_to_enrich(csv_path: str, limit: int) -> list[dict]:
     """
     Charge les chansons à enrichir depuis songs.csv.
@@ -258,6 +231,7 @@ def load_songs_to_enrich(csv_path: str, limit: int) -> list[dict]:
     """
     log.info(f"Chargement de {csv_path} ...")
     df = pd.read_csv(csv_path, low_memory=False)
+    # “Delete any row where id, name, or artists is missing (NaN).”
     df = df.dropna(subset=["id", "name", "artists"])
 
     if len(df) > limit:
@@ -287,7 +261,7 @@ def run():
         1. Appel Last.fm track.getInfo  → tags, playcount, listeners
         2. Si pas de tags → appel artist.getTopTags (fallback)
         3. Appel artist.getSimilar      → artistes similaires
-        4. Envoie dans Kafka : song-metadata + genre-signals
+        4. Envoie dans Kafka : song-metadata 
     """
     api_key = os.getenv("LASTFM_API_KEY", "")
     if not api_key:
@@ -315,17 +289,18 @@ def run():
 
     for i, song in enumerate(songs):
         song_id = song["song_id"]
-        artist  = song["artist"]
+        artist  = song["artist"] # the primary artist
         title   = song["title"]
 
         try:
             # ── 1. Track info ────────────────────────────────────
             track_data = client.get_track_info(artist, title)
             track_info = parse_track_info(track_data) if track_data else {}
+            # our tags 
             track_tags = track_info.get("lastfm_tags", [])
 
             if track_data and track_tags:
-                stats["enriched"] += 1
+                stats["enriched"] += 1 # full success
             elif track_data:
                 stats["fallback"] += 1
             else:
@@ -347,10 +322,6 @@ def run():
             meta = build_metadata_message(song_id, artist, title,
                                           track_info, similar)
             producer.send(TOPIC_SONG_METADATA, value=meta,
-                          key=song_id.encode("utf-8"))
-
-            genre = build_genre_signal(song_id, artist, track_tags, artist_tags)
-            producer.send(TOPIC_GENRE_SIGNALS, value=genre,
                           key=song_id.encode("utf-8"))
 
             # Rate limiting

@@ -14,7 +14,6 @@ Principe : chansons RÉELLES, événements SIMULÉS.
 Envoie vers :
   → song-plays    (événements de lecture sur vraies chansons)
   → user-events   (actions utilisateur avec contexte)
-  → mood-index    (score humeur basé sur valence+energy réelles)
 """
 
 import json
@@ -41,10 +40,8 @@ log = logging.getLogger("producer_stream")
 BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TOPIC_SONG_PLAYS  = os.getenv("TOPIC_SONG_PLAYS",   "song-plays")
 TOPIC_USER_EVENTS = os.getenv("TOPIC_USER_EVENTS",  "user-events")
-TOPIC_MOOD_INDEX  = os.getenv("TOPIC_MOOD_INDEX",   "mood-index")
 DATA_DIR          = os.getenv("DATA_DIR",    "./data")
 TRACKS_CSV        = os.getenv("TRACKS_CSV",  "songs.csv")
-# MXM_TRAIN         = os.getenv("MXM_TRAIN",   "mxm_dataset_train.txt")
 NUM_USERS         = int(os.getenv("NUM_SIMULATED_USERS", 1000))
 INTERVAL_MS       = int(os.getenv("SIMULATION_INTERVAL_MS", 500))
 
@@ -91,10 +88,6 @@ def load_song_catalog(csv_path: str, n: int = CATALOG_SIZE) -> list[dict]:
 
     log.info(f"→ {len(df)} chansons sélectionnées dans le catalogue")
 
-    # ── 2. Charge Musixmatch (bag-of-words) ──────────────────
-    #mxm_index = load_mxm_top_words(mxm_path)
-    #log.info(f"→ {len(mxm_index)} chansons avec données Musixmatch")
-
     # ── 3. Construit le catalogue final ──────────────────────
     catalog = []
     for _, row in df.iterrows():
@@ -116,86 +109,11 @@ def load_song_catalog(csv_path: str, n: int = CATALOG_SIZE) -> list[dict]:
             "tempo":        float(row.get("tempo", 120)),
             "danceability": float(row.get("danceability", 0.5)),
             "acousticness": float(row.get("acousticness", 0.5)),
-            # Top 5 mots des paroles si disponible dans Musixmatch
-            #"top_words":    mxm_index.get(song_id, [])
         }
         catalog.append(entry)
 
     log.info(f"✓ Catalogue chargé : {len(catalog)} chansons prêtes pour la simulation")
     return catalog
-
-# top_n: number of words to extract per song
-def load_mxm_top_words(mxm_path: str, top_n: int = 5) -> dict:
-    """
-    Parse le fichier Musixmatch bag-of-words et extrait les top N mots
-    les plus fréquents pour chaque chanson.
-
-    Format du fichier :
-      - Lignes commençant par # ou % → ignorées (commentaires / vocabulaire)
-
-    Le vocabulaire (ligne %) est parsé pour mapper idx → mot.
-    Retourne : { track_id: ["word1", "word2", ...] }
-    exemple :
-    {
-        "track_1": ["love", "baby", "night"],
-        "track_2": ["fire", "dance", "party"]
-    }
-    remark about the file : 
-    Each song line looks like: TR123,456,12:3,45:10,78:1
-    Meaning:
-    Part	Meaning
-    TR123	track ID
-    456	    internal ID
-    12:3	word index 12 appears 3 times
-    45:10	word index 45 appears 10 times
-    """
-    if not os.path.exists(mxm_path):
-        log.warning(f"Musixmatch non trouvé : {mxm_path} — simulation sans paroles")
-        return {}
-
-    log.info(f"Parsing Musixmatch : {mxm_path} ...")
-    vocabulary = []   # liste des mots : 1- based 
-    mxm_data   = {}   # { track_id: {word_idx: count} }
-
-    with open(mxm_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-
-            # Commentaire → skip
-            if line.startswith("#"):
-                continue
-
-            # Ligne vocabulaire (commence par %)
-            if line.startswith("%"):
-                vocabulary = line[1:].split(",")
-                log.info(f"→ Vocabulaire Musixmatch : {len(vocabulary)} mots")
-                continue
-
-            # Ligne de données : TRACK_ID,MXM_ID,idx:count,...
-            parts = line.split(",")
-            if len(parts) < 3:
-                continue
-
-            track_id = parts[0]
-            word_counts = {}
-            for token in parts[2:]:
-                try:
-                    idx, count = token.split(":")
-                    word_counts[int(idx)] = int(count)
-                except ValueError:
-                    continue
-
-            # Garde les top_n mots les plus fréquents
-            if word_counts and vocabulary:
-                top = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
-                mxm_data[track_id] = [
-                    vocabulary[idx - 1]          # idx est 1-based 
-                    for idx, _ in top
-                    if 1 <= idx <= len(vocabulary)
-                ]
-
-    log.info(f"→ {len(mxm_data)} chansons parsées depuis Musixmatch")
-    return mxm_data
 
 
 # ══════════════════════════════════════════════════════════════
@@ -240,41 +158,6 @@ def generate_user_event(user_id: str, song: dict, event_type: str) -> dict:
     }
 
 
-def compute_mood_score(song: dict) -> dict:
-    """
-    Score d'humeur basé sur valence + energy RÉELLES de la chanson.
-
-    Quadrants :
-      valence↑ energy↑ → happy
-      valence↑ energy↓ → relaxed
-      valence↓ energy↑ → energetic/tense
-      valence↓ energy↓ → melancholic
-    """
-    v = song["valence"]
-    e = song["energy"]
-    mood_score = round(v * 0.6 + e * 0.4, 4)
-
-    if v >= 0.6 and e >= 0.6:
-        label = "happy"
-    elif v >= 0.6 and e < 0.6:
-        label = "relaxed"
-    elif v < 0.6 and e >= 0.6:
-        label = "energetic"
-    else:
-        label = "melancholic"
-
-    return {
-        "event_id":   str(uuid.uuid4()),
-        "song_id":    song["song_id"],
-        "valence":    v,
-        "energy":     e,
-        "mood_score": mood_score,
-        "mood_label": label,
-        #"top_words":  song["top_words"],   # paroles réelles → utile pour NLP Couche 3a
-        "timestamp":  datetime.utcnow().isoformat()
-    }
-
-
 # ══════════════════════════════════════════════════════════════
 # PRODUCER
 # ══════════════════════════════════════════════════════════════
@@ -306,7 +189,7 @@ def run_simulation(max_events: int = None):
     )
 
     log.info(f"Démarrage simulation → {len(catalog)} chansons, {NUM_USERS} utilisateurs fictifs")
-    log.info(f"Topics : {TOPIC_SONG_PLAYS}, {TOPIC_USER_EVENTS}, {TOPIC_MOOD_INDEX}")
+    log.info(f"Topics : {TOPIC_SONG_PLAYS}, {TOPIC_USER_EVENTS}")
 
     producer = create_producer()
     count    = 0
@@ -317,14 +200,10 @@ def run_simulation(max_events: int = None):
             song     = random.choice(catalog)   # vraie chanson
             evt_type = random.choices(EVENT_TYPES, weights=EVENT_WEIGHTS, k=1)[0]
 
-            # ── play → 3 topics ──────────────────────────────────
+            # ── play → 2 topics ──────────────────────────────────
             if evt_type == "play":
                 producer.send(TOPIC_SONG_PLAYS,
                               value=generate_play_event(user_id, song)) \
-                        .add_errback(on_send_error)
-
-                producer.send(TOPIC_MOOD_INDEX,
-                              value=compute_mood_score(song)) \
                         .add_errback(on_send_error)
 
             # ── tous types → user-events ─────────────────────────
