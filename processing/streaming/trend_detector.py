@@ -7,6 +7,7 @@ def main():
         .appName("TrendDetector") \
         .config("spark.cassandra.connection.host", "cassandra") \
         .config("spark.cassandra.connection.port", "9042") \
+        .config("spark.cassandra.connection.localDC", "datacenter1") \
         .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
