@@ -129,5 +129,38 @@ services:
     depends_on:
       - spark-master
 
+  # -----------------------------------------------------------
+  # CASSANDRA — Streaming analytics output store
+  # -----------------------------------------------------------
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=SpotifyCluster
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+      - ../storage/cassandra/init.cql:/docker-entrypoint-initdb.d/init.cql
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'describe keyspaces'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # -----------------------------------------------------------
+  # CASSANDRA INIT — Initializes schema
+  # -----------------------------------------------------------
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ../storage/cassandra/init.cql:/init.cql
+    command: /bin/bash -c "cqlsh cassandra -f /init.cql"
+
 volumes:
   postgres-data:
+  cassandra-data:
