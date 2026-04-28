@@ -4,9 +4,6 @@
 # 3 containers : zookeeper -> kafka broker -> kafka ui
 # =============================================================
 
-# Version de Docker Compose utilisée
-version: "3.8"
-
 # Defines all containers (services) that will run together
 services:
   # -----------------------------------------------------------
@@ -75,3 +72,62 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local-cluster #This is just a label (name) for your Kafka cluster in the UI.
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 #my brokers
+
+  # -----------------------------------------------------------
+  # PostgreSQL — Batch analytics output store
+  # -----------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-spotify_analytics}
+      POSTGRES_USER: ${POSTGRES_USER:-spotify_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spotify_pass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../storage/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spotify_user} -d ${POSTGRES_DB:-spotify_analytics}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # -----------------------------------------------------------
+  # SPARK MASTER — Batch processing coordinator
+  # -----------------------------------------------------------
+  spark-master:
+    build:
+      context: ..
+      dockerfile: docker/spark/Dockerfile
+    image: spotify-spark:3.5.1
+    container_name: spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    volumes:
+      - ..:/opt/pipeline
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # -----------------------------------------------------------
+  # SPARK WORKER — Executes batch tasks
+  # -----------------------------------------------------------
+  spark-worker:
+    image: spotify-spark:3.5.1
+    container_name: spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "2", "--memory", "2G", "--webui-port", "8081", "spark://spark-master:7077"]
+    ports:
+      - "8082:8081"
+    volumes:
+      - ..:/opt/pipeline
+    depends_on:
+      - spark-master
+
+volumes:
+  postgres-data:

@@ -12,7 +12,10 @@ Colonnes confirmées artists.csv (71K lignes) :
   id, name, followers, popularity, genres, main_genre
 
 Envoie vers :
-  → song-metadata   (features audio complètes + album + artiste)
+    → song-metadata   (features audio complètes + album + artiste + infos genre)
+
+Le topic genre-signals est maintenant produit par le job Spark batch
+de clustering, pas directement par ce producer CSV.
 """
 
 import json
@@ -133,6 +136,13 @@ def row_to_metadata_event(row: dict, artist_info: dict) -> dict:
     # Cherche l'artiste principal dans le dict artists
     artist_data = artist_info.get(primary_artist.lower(), {})
 
+    # Genres depuis artists.csv (optionnel si non dispo)
+    raw_genres = artist_data.get("genres", "[]")
+    try:
+        genres_list = ast.literal_eval(raw_genres) if isinstance(raw_genres, str) else []
+    except Exception:
+        genres_list = []
+
     return {
         "song_id":           str(row.get("id", "")),
         "title":             str(row.get("name", "Unknown")),
@@ -156,9 +166,10 @@ def row_to_metadata_event(row: dict, artist_info: dict) -> dict:
         # Infos artiste enrichies depuis artists.csv
         "artist_followers":  int(artist_data.get("followers", 0)),
         "artist_popularity": int(artist_data.get("popularity", 0)),
-        "source":            "kaggle_batch"
+        "main_genre":        str(artist_data.get("main_genre", "Unknown")),
+        "genres":            genres_list,
+        "source":            "kaggle_songs_csv"
     }
-
 
 # ─────────────────────────────────────────────────────────────
 # Kafka batching behavior explanation:
@@ -197,6 +208,7 @@ def run():
         return
 
     log.info(f"Démarrage producer batch CSV → broker={BOOTSTRAP_SERVERS}")
+    log.info(f"Topic sortie: {TOPIC_SONG_METADATA}")
 
     producer     = create_producer()
     artist_index = load_artists(artists_path)   # dict name → row
@@ -224,7 +236,7 @@ def run():
                 time.sleep(BATCH_PAUSE_SEC) # time to wait for the sending to complete and not have an overload
 
         producer.flush()
-        log.info(f"✓ Batch terminé : {sent} chansons envoyées dans Kafka")
+        log.info(f"✓ Batch terminé : {sent} chansons envoyées dans {TOPIC_SONG_METADATA}")
 
     except KeyboardInterrupt:
         log.info("Batch interrompu par l'utilisateur.")
