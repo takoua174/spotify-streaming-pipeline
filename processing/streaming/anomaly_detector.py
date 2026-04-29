@@ -28,29 +28,26 @@ def main():
         .option("kafka.bootstrap.servers", "kafka:29092") \
         .option("subscribe", "user-events") \
         .option("startingOffsets", "latest") \
+        .option("failOnDataLoss", "false") \
         .load()
 
     parsed_df = df.select(from_json(col("value").cast("string"), user_event_schema).alias("data")).select("data.*")
 
-    # Anomaly 1: > 100 plays of same song by a user in 1 minute (Bot suspicion)
+    # Anomaly 1: > 10 plays of same song by a user in 1 minute (Bot suspicion)
     bot_suspicion_df = parsed_df \
         .filter(col("event_type") == "play") \
-        .withWatermark("timestamp", "1 minute") \
         .groupBy(window(col("timestamp"), "1 minute", "30 seconds"), col("user_id"), col("song_id")) \
         .agg(count("event_id").alias("play_count")) \
-        .filter(col("play_count") > 100) \
-        .withColumn("anomaly_type", col("user_id").cast("string")) # Hack for placeholder
+        .filter(col("play_count") > 10) \
+        .withColumn("anomaly_type", when(col("play_count") > -1, "bot_suspicion")) \
+        .withColumn("description", when(col("play_count") > -1, "More than 10 plays in 1 min")) \
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
             col("user_id"),
-            col("anomaly_type").alias("anomaly_type"), # Replaced later
-            col("play_count").cast("string").alias("description")
+            col("anomaly_type"),
+            col("description")
         )
-    
-    bot_suspicion_df = bot_suspicion_df \
-        .withColumn("anomaly_type", when(col("play_count") > -1, "bot_suspicion")) \
-        .withColumn("description", when(col("play_count") > -1, "More than 100 plays in 1 min"))
     
     def write_to_cassandra(batch_df, batch_id):
         batch_df.write \

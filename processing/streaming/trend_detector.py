@@ -32,6 +32,7 @@ def main():
         .option("kafka.bootstrap.servers", "kafka:29092") \
         .option("subscribe", "song-plays") \
         .option("startingOffsets", "latest") \
+        .option("failOnDataLoss", "false") \
         .load()
 
     parsed_df = df.select(from_json(col("value").cast("string"), play_schema).alias("data")).select("data.*")
@@ -41,7 +42,7 @@ def main():
         .groupBy(window(col("timestamp"), "5 minutes", "1 minute"), col("song_id"), col("title"), col("artist")) \
         .count() \
         .withColumnRenamed("count", "play_count") \
-        .filter(col("play_count") > 50) \
+        .filter(col("play_count") > 10) \
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),

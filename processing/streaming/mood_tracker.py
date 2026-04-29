@@ -34,6 +34,7 @@ def main():
         .option("kafka.bootstrap.servers", "kafka:29092") \
         .option("subscribe", "song-plays") \
         .option("startingOffsets", "latest") \
+        .option("failOnDataLoss", "false") \
         .load()
 
     # Convertir JSON en DataFrame
