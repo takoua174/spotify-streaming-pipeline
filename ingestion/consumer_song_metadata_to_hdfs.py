@@ -10,6 +10,8 @@ Important :it creates only one snapshot per run
 
 from __future__ import annotations
 
+from urllib.parse import urlparse, urlunparse
+
 import json
 import os
 from dataclasses import dataclass
@@ -90,8 +92,7 @@ def read_webhdfs_file(cfg: AppConfig, file_path: str) -> str | None:
     return response.text
 
 
-def create_webhdfs_file(cfg: AppConfig, file_path: str, content: str , overwrite=False) -> None:
-    # Step 1: Request file creation (NameNode responds with redirect)
+def create_webhdfs_file(cfg: AppConfig, file_path: str, content: str, overwrite=False) -> None:
     url = f"{cfg.hdfs_webhdfs_base_url}/webhdfs/v1{webhdfs_path(file_path)}"
     response = requests.put(
         url,
@@ -99,16 +100,21 @@ def create_webhdfs_file(cfg: AppConfig, file_path: str, content: str , overwrite
         allow_redirects=False,
         timeout=30,
     )
-    # Accept either:
-    # 201 = created :“File has been created successfully at the NameNode level it confirms creation without needing immediate redirect ”
-    # 307 = redirect to DataNode
     if response.status_code not in {201, 307}:
         response.raise_for_status()
 
     target_url = response.headers.get("Location", url)
-    # Step 2: Upload actual file content to returned DataNode URL
-    upload_response = requests.put(target_url, data=content.encode("utf-8"), timeout=120)
+
+    # ✅ Fix: replace the internal Docker DataNode hostname with localhost
+    parsed = urlparse(target_url)
+    namenode_host = urlparse(cfg.hdfs_webhdfs_base_url).hostname  # "localhost"
+    print("urlllllllllllllllllllllllll",namenode_host,"..............................")
+    fixed_url = urlunparse(parsed._replace(netloc=f"{namenode_host}:{parsed.port}"))
+    print("fixel url", fixed_url)
+    upload_response = requests.put(fixed_url, data=content.encode("utf-8"), timeout=120)
+    print("upload_response",upload_response)
     upload_response.raise_for_status()
+
 
 
 def snapshot_root(cfg: AppConfig) -> PurePosixPath:
@@ -142,6 +148,7 @@ def consume_song_metadata(consumer: KafkaConsumer) -> list[dict[str, Any]]:
     for message in consumer:
         if isinstance(message.value, dict):
             messages.append(message.value)
+    print("000000000000000000000000000000000000000000000000xxxxxxxxxxxxxxxxxxxxxxxxxx00000000000000000000000000000000000")
 
     return messages
 

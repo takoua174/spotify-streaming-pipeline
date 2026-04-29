@@ -102,7 +102,7 @@ services:
   # HDFS — Persistent batch source for Spark
   # -----------------------------------------------------------
   hdfs-namenode:
-    image: bde2020/hadoop-namenode:2.0.0-hadoop3.3.5-java8
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: hdfs-namenode
     ports:
       - "9870:9870" # HDFS NameNode Web UI (host:container)
@@ -119,10 +119,12 @@ services:
       - hdfs-namenode-data:/hadoop/dfs/name
 
   hdfs-datanode:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop3.3.5-java8
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: hdfs-datanode
     depends_on:
       - hdfs-namenode
+    ports:
+      - "9864:9864"
     environment:
       CORE_CONF_fs_defaultFS: hdfs://hdfs-namenode:8020 # tells datanode where the namenode is
       HDFS_CONF_dfs_datanode_data_dir: file:///hadoop/dfs/data
@@ -131,33 +133,6 @@ services:
       SERVICE_PRECONDITION: hdfs-namenode:9870
     volumes:
       - hdfs-datanode-data:/hadoop/dfs/data
-
-  # -----------------------------------------------------------
-  # KAFKA -> HDFS snapshot writer for song metadata
-  # -----------------------------------------------------------
-  song-metadata-hdfs-snapshot:
-    image: python:3.11-slim
-    container_name: song-metadata-hdfs-snapshot
-    depends_on:
-      - kafka
-      - hdfs-namenode
-    working_dir: /opt/pipeline
-    volumes:
-      - ..:/opt/pipeline
-    environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      TOPIC_SONG_METADATA: song-metadata
-      HDFS_WEBHDFS_BASE_URL: http://hdfs-namenode:9870
-      HDFS_DATASET_DIR: /data/song-metadata
-      HDFS_SNAPSHOTS_DIR: snapshots
-      HDFS_INDEX_FILE: _index.json
-      # actually executes /opt/pipeline/ingestion/consumer_song_metadata_to_hdfs.py
-    command:
-      - bash
-      - -lc
-      - |
-        pip install --no-cache-dir -r requirements.txt && \
-        python ingestion/consumer_song_metadata_to_hdfs.py
 
   # -----------------------------------------------------------
   # SPARK MASTER — Batch processing coordinator
