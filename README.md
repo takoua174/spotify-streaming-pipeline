@@ -27,7 +27,7 @@ Apache Kafka  ──  5 topics
                 Cassandra · PostgreSQL · Elasticsearch
                           │
                           ▼
-              Visualisation
+                        Visualisation
                 Grafana · Metabase · React Web App
 ```
 
@@ -84,10 +84,10 @@ Kafka UI available at `http://localhost:8080` once the stack is running.
 
 ## Layer 3a — K-Means genre clustering (implemented)
 
-This batch job reads song audio metadata from Kafka topic `song-metadata`,
-evaluates candidate K values, trains a final K-Means model, then writes
-dashboard-ready outputs to PostgreSQL and publishes clustering signals to
-Kafka topic `genre-signals`.
+This batch job reads song audio metadata from an HDFS history index,
+resolves the latest immutable snapshot, evaluates candidate K values,
+trains a final K-Means model, then writes dashboard-ready outputs to
+PostgreSQL and publishes clustering signals to Kafka topic `genre-signals`.
 
 ### New files
 
@@ -107,7 +107,10 @@ docker compose up -d --build
 cd ..
 python ingestion/producer_batch_csv.py
 
-# 3) Submit Spark batch job from Spark master container
+# 3) Materialize an immutable HDFS snapshot from Kafka
+docker compose exec song-metadata-hdfs-snapshot /bin/bash -lc "python ingestion/consumer_song_metadata_to_hdfs.py"
+
+# 4) Submit Spark batch job from Spark master container
 cd docker
 docker compose exec spark-master /bin/bash -lc "mkdir -p /tmp/.ivy2/cache /tmp/.ivy2/jars ; /opt/spark/bin/spark-submit --master spark://spark-master:7077 --conf spark.jars.ivy=/tmp/.ivy2 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.4 /opt/pipeline/processing/batch/kmeans_genre_clustering.py"
 ```
@@ -125,6 +128,13 @@ docker compose exec spark-master /bin/bash -lc "mkdir -p /tmp/.ivy2/cache /tmp/.
 
 - Topic: `genre-signals`
 - Message types: `song_cluster_assignment`, `cluster_profile`
+
+### HDFS batch input
+
+- Root dataset path: `/data/song-metadata`
+- Immutable snapshots: `/data/song-metadata/snapshots/song-metadata-<run_id>.jsonl`
+- History index: `/data/song-metadata/_index.json`
+- The Spark batch job resolves the latest snapshot from the index file.
 
 ### Quick verification
 
