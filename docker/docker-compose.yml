@@ -174,7 +174,7 @@ services:
       cassandra:
         condition: service_healthy
     environment:
-      GF_PLUGINS_PREINSTALL: hadesarchitect-cassandra-datasource
+      GF_INSTALL_PLUGINS: hadesarchitect-cassandra-datasource
     volumes:
       - grafana-data:/var/lib/grafana
       - ../dashboard/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources

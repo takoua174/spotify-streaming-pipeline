@@ -103,9 +103,11 @@
       "targets": [
         {
           "alias": "{{ artist }}",
-          "columnId": " ",
-          "columnTime": " ",
-          "columnValue": " ",
+          "keyspace": "spotify_streaming",
+          "table": "mood_index_by_artist",
+          "columnId": "artist",
+          "columnTime": "window_start",
+          "columnValue": "mood_score",
           "datasource": {
             "type": "hadesarchitect-cassandra-datasource",
             "uid": "cassandra"
@@ -176,9 +178,11 @@
       "targets": [
         {
           "alias": "",
-          "columnId": " ",
-          "columnTime": " ",
-          "columnValue": " ",
+          "keyspace": "spotify_streaming",
+          "table": "trending_songs_monitor",
+          "columnId": "song_id",
+          "columnTime": "window_start",
+          "columnValue": "play_count",
           "datasource": {
             "type": "hadesarchitect-cassandra-datasource",
             "uid": "cassandra"
@@ -258,9 +262,11 @@
       "targets": [
         {
           "alias": "",
-          "columnId": " ",
-          "columnTime": " ",
-          "columnValue": " ",
+          "keyspace": "spotify_streaming",
+          "table": "anomalies_monitor",
+          "columnId": "user_id",
+          "columnTime": "window_start",
+          "columnValue": "anomaly_type",
           "datasource": {
             "type": "hadesarchitect-cassandra-datasource",
             "uid": "cassandra"
@@ -347,7 +353,7 @@
         "name": "artist",
         "options": [],
         "query": {
-          "rawQuery": "SELECT DISTINCT artist FROM spotify_streaming.mood_index_by_artist"
+          "query": "SELECT DISTINCT artist FROM spotify_streaming.mood_index_by_artist"
         },
         "refresh": 1,
         "regex": "",
