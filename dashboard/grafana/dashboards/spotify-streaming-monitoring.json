@@ -191,11 +191,15 @@
           "rawQuery": true,
           "refId": "A",
           "target": "SELECT window_start, title, artist, play_count, song_id FROM spotify_streaming.trending_songs_monitor WHERE bucket = 'trending' AND window_start > $__timeFrom and window_start < $__timeTo LIMIT 50",
-          "type": "timeserie"
+          "type": "table"
         }
       ],
       "title": "Trending songs (recent)",
       "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "sortBy",
           "options": {
