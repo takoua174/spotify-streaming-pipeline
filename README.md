@@ -84,10 +84,10 @@ Kafka UI available at `http://localhost:8080` once the stack is running.
 
 ## Layer 3a — K-Means genre clustering (implemented)
 
-This batch job reads song audio metadata from an HDFS history index,
-resolves the latest immutable snapshot, evaluates candidate K values,
-trains a final K-Means model, then writes dashboard-ready outputs to
-PostgreSQL and publishes clustering signals to Kafka topic `genre-signals`.
+This batch job reads song audio metadata from HDFS snapshot files,
+evaluates candidate K values, trains a final K-Means model on the full
+dataset, then writes dashboard-ready outputs to PostgreSQL and publishes
+clustering signals to Kafka topic `genre-signals`.
 
 ### New files
 
@@ -110,7 +110,11 @@ python ingestion/producer_batch_csv.py
 # 3) Materialize an immutable HDFS snapshot from Kafka
 docker compose exec song-metadata-hdfs-snapshot /bin/bash -lc "python ingestion/consumer_song_metadata_to_hdfs.py"
 
-# 4) Submit Spark batch job from Spark master container
+# 4) Verify the HDFS snapshot files and index
+docker compose exec hdfs-namenode /bin/bash -lc "hdfs dfs -ls /data/song-metadata && hdfs dfs -ls /data/song-metadata/snapshots"
+docker compose exec hdfs-namenode /bin/bash -lc "hdfs dfs -cat /data/song-metadata/_index.json"
+
+# 5) Submit Spark batch job from Spark master container
 cd docker
 docker compose exec spark-master /bin/bash -lc "mkdir -p /tmp/.ivy2/cache /tmp/.ivy2/jars ; /opt/spark/bin/spark-submit --master spark://spark-master:7077 --conf spark.jars.ivy=/tmp/.ivy2 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.4 /opt/pipeline/processing/batch/kmeans_genre_clustering.py"
 ```
@@ -129,12 +133,21 @@ docker compose exec spark-master /bin/bash -lc "mkdir -p /tmp/.ivy2/cache /tmp/.
 - Topic: `genre-signals`
 - Message types: `song_cluster_assignment`, `cluster_profile`
 
+### Inspect K-Means results in Kafka
+
+Use Kafka UI at `http://localhost:8080`, or consume the topic directly from the broker:
+
+```bash
+cd docker
+docker compose exec kafka /bin/bash -lc "kafka-console-consumer --bootstrap-server kafka:29092 --topic genre-signals --from-beginning --timeout-ms 10000"
+```
+
 ### HDFS batch input
 
 - Root dataset path: `/data/song-metadata`
 - Immutable snapshots: `/data/song-metadata/snapshots/song-metadata-<run_id>.jsonl`
 - History index: `/data/song-metadata/_index.json`
-- The Spark batch job resolves the latest snapshot from the index file.
+- The Spark batch job reads all snapshot paths listed in the index and trains on the whole dataset.
 
 ### Quick verification
 
