@@ -1,6 +1,8 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, window, count, countDistinct, when
+from pyspark.sql.functions import from_json, col, window, count, countDistinct, when, lit
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType
+
+MAX_PLAY_COUNT = 10
 
 def main():
     spark = SparkSession.builder \
@@ -38,7 +40,7 @@ def main():
         .filter(col("event_type") == "play") \
         .groupBy(window(col("timestamp"), "1 minute", "30 seconds"), col("user_id"), col("song_id")) \
         .agg(count("event_id").alias("play_count")) \
-        .filter(col("play_count") > 10) \
+        .filter(col("play_count") > MAX_PLAY_COUNT) \
         .withColumn("anomaly_type", when(col("play_count") > -1, "bot_suspicion")) \
         .withColumn("description", when(col("play_count") > -1, "More than 10 plays in 1 min")) \
         .select(
@@ -54,6 +56,14 @@ def main():
             .format("org.apache.spark.sql.cassandra") \
             .option("keyspace", "spotify_streaming") \
             .option("table", "anomalies") \
+            .mode("append") \
+            .save()
+
+        monitor_df = batch_df.withColumn("bucket", lit("anomalies"))
+        monitor_df.write \
+            .format("org.apache.spark.sql.cassandra") \
+            .option("keyspace", "spotify_streaming") \
+            .option("table", "anomalies_monitor") \
             .mode("append") \
             .save()
 

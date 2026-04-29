@@ -197,6 +197,8 @@ La couche de visualisation expose les résultats à trois audiences différentes
 
 **Grafana** est l'outil de monitoring temps réel. Il consomme le topic Kafka `mood-index` et lit dans Cassandra pour afficher en direct l'évolution du mood par genre, les chansons tendance, les anomalies détectées et les alertes volumétriques. Grafana est pensé pour être consulté en permanence sur un écran de monitoring.
 
+*Note d'implémentation (MVP)* : dans le code actuel, le calcul du mood est agrégé par **artist** (proxy du genre), car les événements streaming ne contiennent pas encore un champ `genre` fiable.
+
 **Metabase** est l'outil d'analytics pour les analystes de données. Il se connecte à PostgreSQL et permet d'explorer les clusters de chansons, la distribution des sentiments par genre, et l'évolution du profil audio d'un genre sur plusieurs décennies.
 
 **La React Web App** est l'interface destinée aux utilisateurs finaux. Elle orchestre deux sources complémentaires : Elasticsearch pour la recherche full-text par paroles (qui retourne des `song_id`), PostgreSQL pour les métadonnées complètes, les scores de sentiment et les profils audio, et Cassandra pour les données de mood et tendances live. Elle propose une Mood Map — visualisation originale croisant sentiment des paroles et mood des écoutes — ainsi qu'un radar chart audio par chanson.

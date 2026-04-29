@@ -67,6 +67,13 @@ def main():
             .mode("append") \
             .save()
 
+        batch_df.write \
+            .format("org.apache.spark.sql.cassandra") \
+            .option("keyspace", "spotify_streaming") \
+            .option("table", "mood_index_by_artist") \
+            .mode("append") \
+            .save()
+
         batch_df.selectExpr("CAST(window_start AS STRING) AS key", "to_json(struct(*)) AS value") \
             .write \
             .format("kafka") \

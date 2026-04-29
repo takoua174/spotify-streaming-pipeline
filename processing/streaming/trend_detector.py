@@ -1,6 +1,9 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, window
+from pyspark.sql.functions import from_json, col, window, lit
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType, IntegerType
+
+
+MAX_PLAY_COUNT = 10
 
 def main():
     spark = SparkSession.builder \
@@ -42,7 +45,7 @@ def main():
         .groupBy(window(col("timestamp"), "5 minutes", "1 minute"), col("song_id"), col("title"), col("artist")) \
         .count() \
         .withColumnRenamed("count", "play_count") \
-        .filter(col("play_count") > 10) \
+        .filter(col("play_count") > MAX_PLAY_COUNT) \
         .select(
             col("window.start").alias("window_start"),
             col("window.end").alias("window_end"),
@@ -57,6 +60,14 @@ def main():
             .format("org.apache.spark.sql.cassandra") \
             .option("keyspace", "spotify_streaming") \
             .option("table", "trending_songs") \
+            .mode("append") \
+            .save()
+
+        monitor_df = batch_df.withColumn("bucket", lit("trending"))
+        monitor_df.write \
+            .format("org.apache.spark.sql.cassandra") \
+            .option("keyspace", "spotify_streaming") \
+            .option("table", "trending_songs_monitor") \
             .mode("append") \
             .save()
 

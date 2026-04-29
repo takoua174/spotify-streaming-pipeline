@@ -14,3 +14,8 @@ SELECT * FROM mood_index LIMIT 5;
 
 SQL
 SELECT * FROM anomalies LIMIT 5;
+
+
+
+
+

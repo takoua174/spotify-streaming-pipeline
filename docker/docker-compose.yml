@@ -161,6 +161,27 @@ services:
       - ../storage/cassandra/init.cql:/init.cql
     command: /bin/bash -c "cqlsh cassandra -f /init.cql"
 
+  # -----------------------------------------------------------
+  # GRAFANA — Real-time monitoring dashboards
+  # Accessible sur http://localhost:3000
+  # -----------------------------------------------------------
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    environment:
+      GF_PLUGINS_PREINSTALL: hadesarchitect-cassandra-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../dashboard/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ../dashboard/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ../dashboard/grafana/dashboards:/var/lib/grafana/dashboards
+
 volumes:
   postgres-data:
   cassandra-data:
+  grafana-data:

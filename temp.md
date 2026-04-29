@@ -1,0 +1,1 @@
+docker exec -it spark-master rm -rf /tmp/.ivy2
