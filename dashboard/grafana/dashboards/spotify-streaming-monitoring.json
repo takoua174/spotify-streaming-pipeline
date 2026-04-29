@@ -275,11 +275,15 @@
           "rawQuery": true,
           "refId": "A",
           "target": "SELECT window_start, user_id, anomaly_type, description FROM spotify_streaming.anomalies_monitor WHERE bucket = 'anomalies' AND window_start > $__timeFrom and window_start < $__timeTo LIMIT 50",
-          "type": "timeserie"
+          "type": "table"
         }
       ],
       "title": "Anomalies (recent)",
       "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "sortBy",
           "options": {
