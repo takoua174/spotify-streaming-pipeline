@@ -4,7 +4,7 @@ kmeans_genre_clustering.py
 Batch Spark job for musical similarity clustering.
 
 Flow:
-1. Read song metadata from Kafka topic song-metadata.
+1. Read song metadata from a persistent batch source : HDFS .
 2. Evaluate candidate K values with silhouette and training cost.
 3. Train final KMeans model.
 4. Persist outputs to PostgreSQL and publish cluster signals to Kafka topic genre-signals.
@@ -12,6 +12,7 @@ Flow:
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -61,6 +62,8 @@ class AppConfig:
     spark_app_name: str
     spark_jars_ivy: str
     spark_sql_shuffle_partitions: int
+    spark_hadoop_fs_default_fs: str #Default filesystem Spark will use
+    hdfs_index_path: str #starting point of dataset (usually _index.json)
     kafka_bootstrap_servers: str
     kafka_input_topic: str
     kafka_output_topic: str
@@ -128,6 +131,11 @@ def load_config() -> AppConfig:
         spark_app_name=os.getenv("SPARK_APP_NAME", "genre-kmeans-batch"),
         spark_jars_ivy=os.getenv("SPARK_JARS_IVY", "/tmp/.ivy2"),
         spark_sql_shuffle_partitions=int(os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "200")),
+        spark_hadoop_fs_default_fs=os.getenv("SPARK_HADOOP_FS_DEFAULT_FS", "hdfs://hdfs-namenode:8020"), #This defines the default filesystem Spark will use
+        hdfs_index_path=os.getenv(
+            "HDFS_INDEX_PATH",
+            "hdfs://hdfs-namenode:8020/data/song-metadata/index.json",
+        ),
         kafka_bootstrap_servers=os.getenv("SPARK_KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"),
         kafka_input_topic=os.getenv("SPARK_KAFKA_INPUT_TOPIC", os.getenv("TOPIC_SONG_METADATA", "song-metadata")),
         kafka_output_topic=os.getenv("SPARK_KAFKA_OUTPUT_TOPIC", os.getenv("TOPIC_GENRE_SIGNALS", "genre-signals")),
@@ -160,6 +168,7 @@ def build_spark_session(cfg: AppConfig) -> SparkSession:
         SparkSession.builder.appName(cfg.spark_app_name)
         .config("spark.jars.ivy", cfg.spark_jars_ivy)
         .config("spark.sql.shuffle.partitions", str(cfg.spark_sql_shuffle_partitions))
+        .config("spark.hadoop.fs.defaultFS", cfg.spark_hadoop_fs_default_fs) # lihna kolna el spark u re gonna work on hdfs
         .config("spark.sql.session.timeZone", "UTC")
         .getOrCreate()
     )
@@ -195,25 +204,46 @@ def song_metadata_schema() -> T.StructType:
     )
 
 
-def read_song_metadata(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFrame]:
-    kafka_df = (
-        spark.read.format("kafka")
-        .option("kafka.bootstrap.servers", cfg.kafka_bootstrap_servers)
-        .option("subscribe", cfg.kafka_input_topic)
-        .option("startingOffsets", cfg.kafka_starting_offsets)
-        .option("endingOffsets", cfg.kafka_ending_offsets)
-        .option("failOnDataLoss", "false")
-        .load()
-    )
+def read_index_payload(spark: SparkSession, index_path: str) -> dict[str, Any]:
+    rows = spark.read.text(index_path).collect()
+    if not rows:
+        raise RuntimeError(f"No index content was found at {index_path}.")
 
-    parsed = (
-        kafka_df.select(F.col("value").cast("string").alias("payload_json"))
-        .select(F.from_json(F.col("payload_json"), song_metadata_schema()).alias("payload"))
-        .select("payload.*")
-    )
+    index_raw = "\n".join(row[0] for row in rows)
+    try:
+        index_payload = json.loads(index_raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid index JSON at {index_path}.") from exc
 
-    raw_count = parsed.count()
+    if not isinstance(index_payload, dict):
+        raise RuntimeError(f"Unexpected index format at {index_path}; expected a JSON object.")
 
+    return index_payload
+
+
+def extract_snapshot_paths(index_payload: dict[str, Any], hdfs_base: str = "") -> list[str]:
+    history = index_payload.get("history", [])
+    snapshot_paths: list[str] = []
+
+    if isinstance(history, list):
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            snapshot_path = entry.get("snapshot_path")
+            if isinstance(snapshot_path, str) and snapshot_path.strip():
+                path = snapshot_path.strip()
+                # ✅ Prepend HDFS URI if path has no scheme
+                if hdfs_base and not path.startswith("hdfs://"):
+                    path = hdfs_base.rstrip("/") + "/" + path.lstrip("/")
+                snapshot_paths.append(path)
+
+    snapshot_paths = list(dict.fromkeys(snapshot_paths))
+    if snapshot_paths:
+        return snapshot_paths
+
+    raise RuntimeError("No snapshot paths were found in the index payload.")
+
+def normalize_song_metadata(parsed: DataFrame) -> DataFrame:
     flattened = parsed.select(
         F.col("song_id"),
         F.coalesce(F.col("main_genre"), F.lit("unknown")).alias("main_genre"),
@@ -258,12 +288,32 @@ def read_song_metadata(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFr
 
     cleaned = cleaned.dropna(subset=FEATURE_COLUMNS)
     deduped = cleaned.dropDuplicates(["song_id"])
+    return deduped
+
+
+def read_song_metadata_from_hdfs_snapshots(
+    spark: SparkSession,
+    cfg: AppConfig,
+    snapshot_paths: list[str],
+) -> tuple[int, DataFrame]:
+    parsed = spark.read.schema(song_metadata_schema()).json(snapshot_paths) #Spark reads all .jsonl snapshot files from HDFS : adhaka aleh batch processing
+    raw_count = parsed.count()
+    deduped = normalize_song_metadata(parsed)
     if cfg.input_max_rows is not None and cfg.input_max_rows > 0:
         deduped = deduped.limit(cfg.input_max_rows)
-    deduped = deduped.cache()
-    return raw_count, deduped
+    return raw_count, deduped.cache()
 
-
+# lihna n9olo spark bara a9ra les snapshots el kol
+def read_song_metadata(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFrame]:
+    index_payload = read_index_payload(spark, cfg.hdfs_index_path)
+    # ✅ Pass the HDFS base so relative paths get prefixed
+    snapshot_paths = extract_snapshot_paths(
+        index_payload,
+        hdfs_base="hdfs://hdfs-namenode:8020"
+    )
+    print(f"[INFO] Snapshot paths resolved: {snapshot_paths}")
+    return read_song_metadata_from_hdfs_snapshots(spark, cfg, snapshot_paths)
+#one writes results to PostgreSQL 
 def write_to_postgres(df: DataFrame, cfg: AppConfig, table_name: str) -> None:
     (
         df.write.format("jdbc")
@@ -276,7 +326,7 @@ def write_to_postgres(df: DataFrame, cfg: AppConfig, table_name: str) -> None:
         .save()
     )
 
-
+#send results to a  kafka topic 
 def write_to_kafka_messages(df: DataFrame, cfg: AppConfig) -> None:
     (
         df.select(F.col("key").cast("string"), F.col("value").cast("string"))
@@ -468,7 +518,7 @@ def main() -> None:
     dedup_count = deduped_df.count()
 
     if dedup_count == 0:
-        raise RuntimeError("No valid records were read from Kafka topic song-metadata.")
+        raise RuntimeError(f"No valid records were read from HDFS .")
 
     assembled_full = ensure_features_vector(deduped_df).cache()
     full_training_rows = assembled_full.count()

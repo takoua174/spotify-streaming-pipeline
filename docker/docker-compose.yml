@@ -89,10 +89,50 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ../storage/postgres/init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spotify_user} -d ${POSTGRES_DB:-spotify_analytics}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-spotify_user} -d ${POSTGRES_DB:-spotify_analytics}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # -----------------------------------------------------------
+  # HDFS — Persistent batch source for Spark
+  # -----------------------------------------------------------
+  hdfs-namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-namenode
+    ports:
+      - "9870:9870" # HDFS NameNode Web UI (host:container)
+      - "8020:8020" # HDFS NameNode RPC(Remote Procedure Call) port for file operations : spark uses RPC
+    environment:
+      CLUSTER_NAME: spotify-pipeline # a namenode manages only one cluster
+      CORE_CONF_fs_defaultFS: hdfs://hdfs-namenode:8020 # defaultFS : HDFS
+      HDFS_CONF_dfs_namenode_http-address: hdfs-namenode:9870
+      HDFS_CONF_dfs_namenode_name_dir: file:///hadoop/dfs/name #The directory where the NameNode stores its metadata on disk
+      HDFS_CONF_dfs_permissions_enabled: "false" #HDFS will NOT enforce user/group access control
+      HDFS_CONF_dfs_webhdfs_enabled: "true" #Enables WebHDFS, which is a REST API (HTTP) for HDFS
+      HDFS_CONF_dfs_replication: 1 #Only ONE copy of each data block is stored
+    volumes:
+      - hdfs-namenode-data:/hadoop/dfs/name
+
+  hdfs-datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-datanode
+    depends_on:
+      - hdfs-namenode
+    ports:
+      - "9864:9864"
+    environment:
+      CORE_CONF_fs_defaultFS: hdfs://hdfs-namenode:8020 # tells datanode where the namenode is
+      HDFS_CONF_dfs_datanode_data_dir: file:///hadoop/dfs/data
+      HDFS_CONF_dfs_webhdfs_enabled: "true"
+      HDFS_CONF_dfs_replication: 1
+      SERVICE_PRECONDITION: hdfs-namenode:9870
+    volumes:
+      - hdfs-datanode-data:/hadoop/dfs/data
 
   # -----------------------------------------------------------
   # SPARK MASTER — Batch processing coordinator
@@ -103,17 +143,33 @@ services:
       dockerfile: docker/spark/Dockerfile
     image: spotify-spark:3.5.1
     container_name: spark-master
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
+    command:
+      [
+        "/opt/spark/bin/spark-class",
+        "org.apache.spark.deploy.master.Master",
+        "--host",
+        "spark-master",
+        "--port",
+        "7077",
+        "--webui-port",
+        "8080",
+      ]
     ports:
       - "7077:7077"
       - "8081:8080"
     volumes:
       - ..:/opt/pipeline
+    environment:
+      SPARK_HADOOP_FS_DEFAULT_FS: hdfs://hdfs-namenode:8020
+      SPARK_BATCH_INPUT_MODE: hdfs_index
+      SPARK_BATCH_INPUT_PATH: hdfs://hdfs-namenode:8020/data/song-metadata/_index.json
     depends_on:
       kafka:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      hdfs-namenode:
+        condition: service_started
 
   # -----------------------------------------------------------
   # SPARK WORKER — Executes batch tasks
@@ -121,13 +177,28 @@ services:
   spark-worker:
     image: spotify-spark:3.5.1
     container_name: spark-worker
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "2", "--memory", "2G", "--webui-port", "8081", "spark://spark-master:7077"]
+    command:
+      [
+        "/opt/spark/bin/spark-class",
+        "org.apache.spark.deploy.worker.Worker",
+        "--cores",
+        "2",
+        "--memory",
+        "2G",
+        "--webui-port",
+        "8081",
+        "spark://spark-master:7077",
+      ]
     ports:
       - "8082:8081"
     volumes:
       - ..:/opt/pipeline
+    environment:
+      SPARK_HADOOP_FS_DEFAULT_FS: hdfs://hdfs-namenode:8020
     depends_on:
       - spark-master
 
 volumes:
   postgres-data:
+  hdfs-namenode-data:
+  hdfs-datanode-data:
