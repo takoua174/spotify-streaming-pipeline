@@ -85,12 +85,36 @@ def ensure_webhdfs_directory(cfg: AppConfig, directory: str) -> None:
 
 def read_webhdfs_file(cfg: AppConfig, file_path: str) -> str | None:
     url = f"{cfg.hdfs_webhdfs_base_url}/webhdfs/v1{webhdfs_path(file_path)}"
-    response = requests.get(url, params={"op": "OPEN"}, allow_redirects=True, timeout=30)    # Open file via WebHDFS
+    
+    # Step 1: Ask NameNode — don't follow redirect automatically
+    response = requests.get(
+        url,
+        params={"op": "OPEN"},
+        allow_redirects=False,  # ✅ prevent auto-follow to Docker internal host
+        timeout=30,
+    )
+
     if response.status_code == 404:
         return None
-    response.raise_for_status()
-    return response.text
 
+    if response.status_code == 200:
+        return response.text  # direct response, no redirect needed
+
+    if response.status_code != 307:
+        response.raise_for_status()
+
+    # Step 2: Rewrite internal Docker hostname → localhost
+    target_url = response.headers.get("Location")
+    parsed = urlparse(target_url)
+    namenode_host = urlparse(cfg.hdfs_webhdfs_base_url).hostname
+    fixed_url = urlunparse(parsed._replace(netloc=f"{namenode_host}:{parsed.port}"))
+
+    # Step 3: Follow the fixed redirect
+    read_response = requests.get(fixed_url, timeout=30)
+    if read_response.status_code == 404:
+        return None
+    read_response.raise_for_status()
+    return read_response.text
 
 def create_webhdfs_file(cfg: AppConfig, file_path: str, content: str, overwrite=False) -> None:
     url = f"{cfg.hdfs_webhdfs_base_url}/webhdfs/v1{webhdfs_path(file_path)}"
@@ -100,21 +124,21 @@ def create_webhdfs_file(cfg: AppConfig, file_path: str, content: str, overwrite=
         allow_redirects=False,
         timeout=30,
     )
-    if response.status_code not in {201, 307}:
-        response.raise_for_status()
 
-    target_url = response.headers.get("Location", url)
+    if response.status_code == 201:
+        return  # ✅ File created in one step, nothing more to do
 
-    # ✅ Fix: replace the internal Docker DataNode hostname with localhost
+    if response.status_code != 307:
+        response.raise_for_status()  # Unexpected status → raise
+
+    # 307 redirect: rewrite Docker internal hostname → localhost
+    target_url = response.headers.get("Location")
     parsed = urlparse(target_url)
-    namenode_host = urlparse(cfg.hdfs_webhdfs_base_url).hostname  # "localhost"
-    print("urlllllllllllllllllllllllll",namenode_host,"..............................")
+    namenode_host = urlparse(cfg.hdfs_webhdfs_base_url).hostname
     fixed_url = urlunparse(parsed._replace(netloc=f"{namenode_host}:{parsed.port}"))
-    print("fixel url", fixed_url)
-    upload_response = requests.put(fixed_url, data=content.encode("utf-8"), timeout=120)
-    print("upload_response",upload_response)
-    upload_response.raise_for_status()
 
+    upload_response = requests.put(fixed_url, data=content.encode("utf-8"), timeout=120)
+    upload_response.raise_for_status()
 
 
 def snapshot_root(cfg: AppConfig) -> PurePosixPath:

@@ -134,7 +134,7 @@ def load_config() -> AppConfig:
         spark_hadoop_fs_default_fs=os.getenv("SPARK_HADOOP_FS_DEFAULT_FS", "hdfs://hdfs-namenode:8020"), #This defines the default filesystem Spark will use
         hdfs_index_path=os.getenv(
             "HDFS_INDEX_PATH",
-            "hdfs://hdfs-namenode:8020/data/song-metadata/_index.json",
+            "hdfs://hdfs-namenode:8020/data/song-metadata/index.json",
         ),
         kafka_bootstrap_servers=os.getenv("SPARK_KAFKA_BOOTSTRAP_SERVERS", "kafka:29092"),
         kafka_input_topic=os.getenv("SPARK_KAFKA_INPUT_TOPIC", os.getenv("TOPIC_SONG_METADATA", "song-metadata")),
@@ -221,7 +221,7 @@ def read_index_payload(spark: SparkSession, index_path: str) -> dict[str, Any]:
     return index_payload
 
 
-def extract_snapshot_paths(index_payload: dict[str, Any]) -> list[str]:
+def extract_snapshot_paths(index_payload: dict[str, Any], hdfs_base: str = "") -> list[str]:
     history = index_payload.get("history", [])
     snapshot_paths: list[str] = []
 
@@ -231,14 +231,17 @@ def extract_snapshot_paths(index_payload: dict[str, Any]) -> list[str]:
                 continue
             snapshot_path = entry.get("snapshot_path")
             if isinstance(snapshot_path, str) and snapshot_path.strip():
-                snapshot_paths.append(snapshot_path.strip())
+                path = snapshot_path.strip()
+                # ✅ Prepend HDFS URI if path has no scheme
+                if hdfs_base and not path.startswith("hdfs://"):
+                    path = hdfs_base.rstrip("/") + "/" + path.lstrip("/")
+                snapshot_paths.append(path)
 
     snapshot_paths = list(dict.fromkeys(snapshot_paths))
     if snapshot_paths:
         return snapshot_paths
 
     raise RuntimeError("No snapshot paths were found in the index payload.")
-
 
 def normalize_song_metadata(parsed: DataFrame) -> DataFrame:
     flattened = parsed.select(
@@ -303,7 +306,12 @@ def read_song_metadata_from_hdfs_snapshots(
 # lihna n9olo spark bara a9ra les snapshots el kol
 def read_song_metadata(spark: SparkSession, cfg: AppConfig) -> tuple[int, DataFrame]:
     index_payload = read_index_payload(spark, cfg.hdfs_index_path)
-    snapshot_paths = extract_snapshot_paths(index_payload)
+    # ✅ Pass the HDFS base so relative paths get prefixed
+    snapshot_paths = extract_snapshot_paths(
+        index_payload,
+        hdfs_base="hdfs://hdfs-namenode:8020"
+    )
+    print(f"[INFO] Snapshot paths resolved: {snapshot_paths}")
     return read_song_metadata_from_hdfs_snapshots(spark, cfg, snapshot_paths)
 #one writes results to PostgreSQL 
 def write_to_postgres(df: DataFrame, cfg: AppConfig, table_name: str) -> None:
