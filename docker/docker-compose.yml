@@ -177,18 +177,7 @@ services:
   spark-worker:
     image: spotify-spark:3.5.1
     container_name: spark-worker
-    command:
-      [
-        "/opt/spark/bin/spark-class",
-        "org.apache.spark.deploy.worker.Worker",
-        "--cores",
-        "2",
-        "--memory",
-        "2G",
-        "--webui-port",
-        "8081",
-        "spark://spark-master:7077",
-      ]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "4", "--memory", "4G", "--webui-port", "8081", "spark://spark-master:7077"]
     ports:
       - "8082:8081"
     volumes:
@@ -198,7 +187,61 @@ services:
     depends_on:
       - spark-master
 
+  # -----------------------------------------------------------
+  # CASSANDRA — Streaming analytics output store
+  # -----------------------------------------------------------
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_CLUSTER_NAME=SpotifyCluster
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+      - ../storage/cassandra/init.cql:/docker-entrypoint-initdb.d/init.cql
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'describe keyspaces'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # -----------------------------------------------------------
+  # CASSANDRA INIT — Initializes schema
+  # -----------------------------------------------------------
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ../storage/cassandra/init.cql:/init.cql
+    command: /bin/bash -c "cqlsh cassandra -f /init.cql"
+
+  # -----------------------------------------------------------
+  # GRAFANA — Real-time monitoring dashboards
+  # Accessible sur http://localhost:3000
+  # -----------------------------------------------------------
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    environment:
+      GF_INSTALL_PLUGINS: hadesarchitect-cassandra-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../dashboard/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ../dashboard/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ../dashboard/grafana/dashboards:/var/lib/grafana/dashboards
+
 volumes:
   postgres-data:
+  cassandra-data:
+  grafana-data:
   hdfs-namenode-data:
   hdfs-datanode-data:
