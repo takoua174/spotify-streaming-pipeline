@@ -73,3 +73,18 @@ CREATE TABLE IF NOT EXISTS anomalies_monitor (
     description text,
     PRIMARY KEY ((bucket), window_start, user_id, anomaly_type)
 ) WITH CLUSTERING ORDER BY (window_start DESC, user_id ASC, anomaly_type ASC);
+
+-- -----------------------------------------------------------
+-- TABLES FOR USER MOOD TRACKER
+-- -----------------------------------------------------------
+
+-- Table for global mood tracker (time series monitor)
+CREATE TABLE IF NOT EXISTS global_mood_monitor (
+    bucket text,
+    window_start timestamp,
+    window_end timestamp,
+    mood_score float,
+    avg_valence float,
+    avg_energy float,
+    PRIMARY KEY ((bucket), window_start)
+) WITH CLUSTERING ORDER BY (window_start DESC);
