@@ -22,8 +22,8 @@ def test_anomaly():
         event = {
             "event_id": str(uuid.uuid4()),
             "event_type": "play", # Must be "play" for your Spark filter
-            "user_id": "sahbi si l hacker",
-            "song_id": "msaken msaken",
+            "user_id": "takoush_hacker",
+            "song_id": "nabeul_nabeul",
             "timestamp": datetime.utcnow().isoformat(),
             "device": "desktop",
             "country": "TN",
