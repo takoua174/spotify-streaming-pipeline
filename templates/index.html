@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lyrics Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d0d;
+      --surface:   #161616;
+      --border:    #2a2a2a;
+      --text:      #e8e8e8;
+      --muted:     #666;
+      --accent:    #c8f04a;   /* sharp lime green — the one memorable color */
+      --danger:    #ff5c5c;
+      --radius:    6px;
+      --mono:      'DM Mono', monospace;
+      --sans:      'DM Sans', sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Layout ── */
+    .layout {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 52px 0 36px;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 400;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    header p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ── Search bar ── */
+    .search-wrap {
+      padding: 32px 0 24px;
+    }
+    .search-row {
+      display: flex;
+      gap: 8px;
+    }
+    input[type="text"] {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 14px;
+      padding: 11px 16px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    button {
+      background: var(--accent);
+      color: #0d0d0d;
+      border: none;
+      border-radius: var(--radius);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 11px 22px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Filters ── */
+    .filters {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 7px 12px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    select:focus { border-color: var(--accent); }
+    select option { background: var(--surface); }
+
+    .filter-label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      align-self: center;
+    }
+
+    /* ── Results meta ── */
+    .results-meta {
+      padding: 20px 0 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      min-height: 36px;
+    }
+    .results-meta span { color: var(--accent); }
+
+    /* ── Cards ── */
+    .results { display: flex; flex-direction: column; gap: 1px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 16px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .card:hover {
+      border-color: #3a3a3a;
+      background: #1c1c1c;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-artist {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-meta {
+      grid-column: 1;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 2px 7px;
+    }
+    .tag.accent { color: var(--accent); border-color: #3a4a20; }
+
+    .card-score {
+      grid-row: 1 / 3;
+      grid-column: 2;
+      align-self: center;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .card-score strong {
+      display: block;
+      font-size: 16px;
+      color: var(--accent);
+      font-weight: 300;
+    }
+
+    /* ── Empty / Error ── */
+    .empty {
+      padding: 60px 0;
+      text-align: center;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    .empty span { display: block; font-size: 28px; margin-bottom: 12px; }
+
+    /* ── Modal ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .modal-backdrop.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 100%;
+      max-width: 620px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .modal-header h2 {
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+    .modal-header p {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+    .modal-close {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: var(--radius);
+      padding: 4px 10px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .modal-close:hover { color: var(--text); border-color: #444; }
+
+    .modal-tags {
+      padding: 12px 24px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-lyrics {
+      padding: 20px 24px;
+      overflow-y: auto;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-style: italic;
+      font-weight: 300;
+      line-height: 1.9;
+      color: #bbb;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .modal-id {
+      padding: 12px 24px;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    .spinner.active { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <header>
+    <h1>Lyrics Search &mdash; Mood Intelligence System</h1>
+    <p>Full-text search across 550K songs indexed in Elasticsearch</p>
+  </header>
+
+  <div class="search-wrap">
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="Search lyrics, titles, artists…" autocomplete="off" />
+      <div class="spinner" id="spinner"></div>
+      <button id="searchBtn">Search</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <span class="filter-label">Field</span>
+    <select id="fieldSelect">
+      <option value="lyrics">Lyrics</option>
+      <option value="title">Title</option>
+      <option value="primary_artist">Artist</option>
+    </select>
+
+    <span class="filter-label">Mode</span>
+    <select id="modeSelect">
+      <option value="match">Fuzzy match</option>
+      <option value="match_phrase">Exact phrase</option>
+    </select>
+
+    <span class="filter-label">Genre</span>
+    <select id="genreSelect">
+      <option value="">All genres</option>
+    </select>
+
+    <span class="filter-label">Results</span>
+    <select id="sizeSelect">
+      <option value="10">10</option>
+      <option value="25">25</option>
+      <option value="50">50</option>
+    </select>
+  </div>
+
+  <div class="results-meta" id="resultsMeta"></div>
+  <div class="results" id="results"></div>
+</div>
+
+<!-- Song detail modal -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h2 id="modalTitle"></h2>
+        <p id="modalArtist"></p>
+      </div>
+      <button class="modal-close" id="modalClose">Close</button>
+    </div>
+    <div class="modal-tags" id="modalTags"></div>
+    <div class="modal-lyrics" id="modalLyrics"></div>
+    <div class="modal-id" id="modalId"></div>
+  </div>
+</div>
+
+<script>
+  const searchInput  = document.getElementById('searchInput');
+  const searchBtn    = document.getElementById('searchBtn');
+  const spinner      = document.getElementById('spinner');
+  const fieldSelect  = document.getElementById('fieldSelect');
+  const modeSelect   = document.getElementById('modeSelect');
+  const genreSelect  = document.getElementById('genreSelect');
+  const sizeSelect   = document.getElementById('sizeSelect');
+  const resultsMeta  = document.getElementById('resultsMeta');
+  const resultsEl    = document.getElementById('results');
+  const backdrop     = document.getElementById('modalBackdrop');
+  const modalClose   = document.getElementById('modalClose');
+
+  // ── Load genres into dropdown ──
+  fetch('/genres')
+    .then(r => r.json())
+    .then(genres => {
+      genres.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        genreSelect.appendChild(opt);
+      });
+    });
+
+  // ── Search ──
+  async function doSearch() {
+    const q = searchInput.value.trim();
+    if (!q) return;
+
+    setLoading(true);
+    resultsMeta.innerHTML = '';
+    resultsEl.innerHTML   = '';
+
+    const params = new URLSearchParams({
+      q,
+      field: fieldSelect.value,
+      mode:  modeSelect.value,
+      genre: genreSelect.value,
+      size:  sizeSelect.value,
+    });
+
+    try {
+      const resp = await fetch(`/search?${params}`);
+      const data = await resp.json();
+      renderResults(data, q);
+    } catch (e) {
+      resultsMeta.innerHTML = `<span style="color:var(--danger)">Error connecting to server</span>`;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function setLoading(on) {
+    spinner.classList.toggle('active', on);
+    searchBtn.disabled = on;
+  }
+
+  function renderResults(data, q) {
+    const { hits, total } = data;
+
+    if (total === 0) {
+      resultsMeta.innerHTML = `No results for <span>"${esc(q)}"</span>`;
+      resultsEl.innerHTML = `<div class="empty"><span>∅</span>No songs matched your query</div>`;
+      return;
+    }
+
+    resultsMeta.innerHTML = `<span>${total.toLocaleString()}</span> results — showing ${hits.length}`;
+
+    resultsEl.innerHTML = hits.map(h => `
+      <div class="card" data-id="${h.song_id}">
+        <div class="card-title">${esc(h.title) || '<em>Untitled</em>'}</div>
+        <div class="card-artist">${esc(h.primary_artist)}${h.year ? ' · ' + h.year : ''}</div>
+        <div class="card-meta">
+          ${h.genre ? `<span class="tag accent">${esc(h.genre)}</span>` : ''}
+          ${h.niche_genres.slice(0, 2).map(g => `<span class="tag">${esc(g)}</span>`).join('')}
+          ${h.popularity > 0 ? `<span class="tag">pop ${h.popularity}</span>` : ''}
+        </div>
+        <div class="card-score">
+          <strong>${h.score}</strong>
+          score
+        </div>
+      </div>
+    `).join('');
+
+    // Click to open modal
+    resultsEl.querySelectorAll('.card').forEach(card => {
+      card.addEventListener('click', () => openModal(card.dataset.id));
+    });
+  }
+
+  // ── Modal ──
+  async function openModal(songId) {
+    const resp = await fetch(`/song/${songId}`);
+    const s    = await resp.json();
+
+    document.getElementById('modalTitle').textContent  = s.title || 'Untitled';
+    document.getElementById('modalArtist').textContent = s.artists.join(', ');
+    document.getElementById('modalId').textContent     = `song_id: ${s.song_id}`;
+
+    const tags = document.getElementById('modalTags');
+    tags.innerHTML = [
+      s.year        ? `<span class="tag">${s.year}</span>` : '',
+      s.genre       ? `<span class="tag accent">${esc(s.genre)}</span>` : '',
+      s.popularity  ? `<span class="tag">popularity ${s.popularity}</span>` : '',
+      ...s.niche_genres.map(g => `<span class="tag">${esc(g)}</span>`),
+    ].join('');
+
+    const lyricsEl = document.getElementById('modalLyrics');
+    if (s.lyrics && s.lyrics.trim()) {
+      lyricsEl.textContent = s.lyrics.replace(/\\n/g, '\n');
+    } else {
+      lyricsEl.textContent = 'No lyrics available for this song.';
+    }
+
+    backdrop.classList.add('open');
+  }
+
+  modalClose.addEventListener('click',  () => backdrop.classList.remove('open'));
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
+  document.addEventListener('keydown',  e => { if (e.key === 'Escape') backdrop.classList.remove('open'); });
+
+  // ── Triggers ──
+  searchBtn.addEventListener('click', doSearch);
+  searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+  // ── Helpers ──
+  function esc(str) {
+    return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
