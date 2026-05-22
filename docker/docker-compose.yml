@@ -177,7 +177,7 @@ services:
   spark-worker:
     image: spotify-spark:3.5.1
     container_name: spark-worker
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "4", "--memory", "4G", "--webui-port", "8081", "spark://spark-master:7077"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "5", "--memory", "5G", "--webui-port", "8081", "spark://spark-master:7077"]
     ports:
       - "8082:8081"
     volumes:
