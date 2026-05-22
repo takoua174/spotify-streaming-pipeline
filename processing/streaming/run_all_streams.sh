@@ -43,5 +43,21 @@ TREND_PID=$!
   anomaly_detector.py &
 ANOMALY_PID=$!
 
+/opt/spark/bin/spark-submit --packages $SPARK_PACKAGES \
+  --master spark://spark-master:7077 \
+  --conf spark.cores.max=1 \
+  --conf spark.executor.memory=768m \
+  --conf spark.jars.ivy=/tmp/.ivy2 \
+  user_mood_tracker.py &
+USER_MOOD_PID=$!
+
+/opt/spark/bin/spark-submit --packages $SPARK_PACKAGES \
+  --master spark://spark-master:7077 \
+  --conf spark.cores.max=1 \
+  --conf spark.executor.memory=768m \
+  --conf spark.jars.ivy=/tmp/.ivy2 \
+  realtime_classifier.py &
+CLASSIFIER_PID=$!
+
 echo "All jobs submitted. View jobs in Spark UI (http://localhost:8080)."
-wait $MOOD_PID $TREND_PID $ANOMALY_PID
+wait $MOOD_PID $TREND_PID $ANOMALY_PID $USER_MOOD_PID $CLASSIFIER_PID

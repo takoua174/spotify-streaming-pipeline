@@ -1,0 +1,1 @@
+docker exec -it spark-master bash /opt/pipeline/docker/scripts/load_cluster_centroids.sh

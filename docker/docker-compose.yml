@@ -115,6 +115,7 @@ services:
       HDFS_CONF_dfs_permissions_enabled: "false" #HDFS will NOT enforce user/group access control
       HDFS_CONF_dfs_webhdfs_enabled: "true" #Enables WebHDFS, which is a REST API (HTTP) for HDFS
       HDFS_CONF_dfs_replication: 1 #Only ONE copy of each data block is stored
+      HDFS_CONF_dfs_namenode_name_dir_restore: "true"
     volumes:
       - hdfs-namenode-data:/hadoop/dfs/name
 
@@ -177,7 +178,7 @@ services:
   spark-worker:
     image: spotify-spark:3.5.1
     container_name: spark-worker
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "4", "--memory", "4G", "--webui-port", "8081", "spark://spark-master:7077"]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "--cores", "5", "--memory", "5G", "--webui-port", "8081", "spark://spark-master:7077"]
     ports:
       - "8082:8081"
     volumes:
@@ -238,6 +239,38 @@ services:
       - ../dashboard/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
       - ../dashboard/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - ../dashboard/grafana/dashboards:/var/lib/grafana/dashboards
+  
+  # -----------------------------------------------------------
+  # ELASTICSEARCH — Full-text search index (lyrics + title)
+  # Single-node dev setup — consistent with the rest of the stack
+  # Security disabled: no auth needed in dev
+  # Accessible sur http://localhost:9200
+  # -----------------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    environment:
+      # Single-node: no cluster election needed, starts immediately
+      - discovery.type=single-node
+      # 512m is enough for 550K songs in dev.
+      # Rule of thumb: never exceed 50% of available RAM
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      # Disable TLS + auth for local dev.
+      # In production: remove this line and set ES_USER/ES_PASS in .env
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+
+
+
 
 volumes:
   postgres-data:
@@ -245,3 +278,4 @@ volumes:
   grafana-data:
   hdfs-namenode-data:
   hdfs-datanode-data:
+  elasticsearch-data:

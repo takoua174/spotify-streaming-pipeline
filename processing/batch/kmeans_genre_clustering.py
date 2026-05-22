@@ -637,7 +637,7 @@ def main() -> None:
 
     assignment_signals_df = build_genre_signal_assignments_for_kafka(cfg, final_predictions)
     profile_signals_df = build_genre_signal_profiles_for_kafka(cfg, profiles_df, centroids_df)
-    write_to_kafka_messages(assignment_signals_df, cfg)
+    #write_to_kafka_messages(assignment_signals_df, cfg)
     write_to_kafka_messages(profile_signals_df, cfg)
 
     print("[INFO] Batch KMeans job completed successfully.")

@@ -73,3 +73,51 @@ CREATE TABLE IF NOT EXISTS anomalies_monitor (
     description text,
     PRIMARY KEY ((bucket), window_start, user_id, anomaly_type)
 ) WITH CLUSTERING ORDER BY (window_start DESC, user_id ASC, anomaly_type ASC);
+
+-- -----------------------------------------------------------
+-- TABLES FOR USER MOOD TRACKER
+-- -----------------------------------------------------------
+
+-- Table for global mood tracker (time series monitor)
+CREATE TABLE IF NOT EXISTS global_mood_monitor (
+    bucket text,
+    window_start timestamp,
+    window_end timestamp,
+    mood_score float,
+    avg_valence float,
+    avg_energy float,
+    PRIMARY KEY ((bucket), window_start)
+) WITH CLUSTERING ORDER BY (window_start DESC);
+
+-- -----------------------------------------------------------
+-- TABLES FOR REAL-TIME SONG CLASSIFICATION
+-- -----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS song_classifications (
+    song_id text PRIMARY KEY,
+    title text,
+    artist text,
+    cluster_id int,
+    classified_at timestamp
+);
+
+-- -----------------------------------------------------------
+-- TABLES FOR CLUSTER CENTROIDS
+-- -----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS cluster_centroids (
+    cluster_id int PRIMARY KEY,
+    run_id text,
+    cluster_size int,
+    top_genres text,
+    danceability float,
+    energy float,
+    acousticness float,
+    instrumentalness float,
+    valence float,
+    speechiness float,
+    liveness float,
+    loudness_norm float,
+    tempo_norm float
+);
+
