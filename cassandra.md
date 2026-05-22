@@ -18,4 +18,10 @@ SELECT * FROM anomalies LIMIT 5;
 
 
 
+update 
+docker cp storage/cassandra/init.cql cassandra:/init.cql
+
+docker exec -it cassandra cqlsh -f /init.cql
+
+SELECT * FROM cluster_centroids LIMIT 10;
 

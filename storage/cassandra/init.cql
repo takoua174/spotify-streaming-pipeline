@@ -88,3 +88,36 @@ CREATE TABLE IF NOT EXISTS global_mood_monitor (
     avg_energy float,
     PRIMARY KEY ((bucket), window_start)
 ) WITH CLUSTERING ORDER BY (window_start DESC);
+
+-- -----------------------------------------------------------
+-- TABLES FOR REAL-TIME SONG CLASSIFICATION
+-- -----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS song_classifications (
+    song_id text PRIMARY KEY,
+    title text,
+    artist text,
+    cluster_id int,
+    classified_at timestamp
+);
+
+-- -----------------------------------------------------------
+-- TABLES FOR CLUSTER CENTROIDS
+-- -----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS cluster_centroids (
+    cluster_id int PRIMARY KEY,
+    run_id text,
+    cluster_size int,
+    top_genres text,
+    danceability float,
+    energy float,
+    acousticness float,
+    instrumentalness float,
+    valence float,
+    speechiness float,
+    liveness float,
+    loudness_norm float,
+    tempo_norm float
+);
+

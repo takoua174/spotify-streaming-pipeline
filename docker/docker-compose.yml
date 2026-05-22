@@ -115,6 +115,7 @@ services:
       HDFS_CONF_dfs_permissions_enabled: "false" #HDFS will NOT enforce user/group access control
       HDFS_CONF_dfs_webhdfs_enabled: "true" #Enables WebHDFS, which is a REST API (HTTP) for HDFS
       HDFS_CONF_dfs_replication: 1 #Only ONE copy of each data block is stored
+      HDFS_CONF_dfs_namenode_name_dir_restore: "true"
     volumes:
       - hdfs-namenode-data:/hadoop/dfs/name
 
