@@ -239,6 +239,38 @@ services:
       - ../dashboard/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
       - ../dashboard/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - ../dashboard/grafana/dashboards:/var/lib/grafana/dashboards
+  
+  # -----------------------------------------------------------
+  # ELASTICSEARCH — Full-text search index (lyrics + title)
+  # Single-node dev setup — consistent with the rest of the stack
+  # Security disabled: no auth needed in dev
+  # Accessible sur http://localhost:9200
+  # -----------------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: elasticsearch
+    environment:
+      # Single-node: no cluster election needed, starts immediately
+      - discovery.type=single-node
+      # 512m is enough for 550K songs in dev.
+      # Rule of thumb: never exceed 50% of available RAM
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      # Disable TLS + auth for local dev.
+      # In production: remove this line and set ES_USER/ES_PASS in .env
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+
+
+
 
 volumes:
   postgres-data:
@@ -246,3 +278,4 @@ volumes:
   grafana-data:
   hdfs-namenode-data:
   hdfs-datanode-data:
+  elasticsearch-data:
